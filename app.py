@@ -2,26 +2,35 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import gdown
+import os
 
 # Configuração da página para aproveitar toda a largura da tela
 st.set_page_config(page_title="Dashboard de Bilhetagem e Faturamento", layout="wide")
 
-# 1. Carregamento Otimizado de Dados
+# 1. Carregamento Otimizado de Dados com gdown
 @st.cache_data
 def carregar_dados_otimizado():
-    # INSIRA O SEU ID DO GOOGLE DRIVE AQUI
-    ID_DO_ARQUIVO = "1qCIIRdV1ZogQUOvM2Wn2ViSCWfe9716t"
+    # INSIRA APENAS O ID DO SEU GOOGLE DRIVE AQUI
+    ID_DO_ARQUIVO = "COLE_AQUI_O_SEU_ID_DO_DRIVE"
     
-    # Monta a URL de download direto aceita pelo Pandas
-    url_direta = f"https://google.com{ID_DO_ARQUIVO}"
+    # Define um nome local temporário para o arquivo no servidor
+    arquivo_local = "dados_temporarios.parquet"
+    
+    # Se o arquivo ainda não existe no servidor local, faz o download usando gdown
+    if not os.path.exists(arquivo_local):
+        url_drive = f"https://google.com{ID_DO_ARQUIVO}"
+        # O gdown faz o download e gerencia o aviso de vírus de arquivos grandes
+        gdown.download(url_drive, arquivo_local, quiet=False)
     
     colunas_necessarias = [
         'data_emissao_bilhete', 'rota_unica', 'tipo_servico',
         'quantidade_bilhetes', 'valor_total', 'tipo_tarifa', 'meses_antecedencia'
     ]
     
+    # Lê o arquivo a partir do disco local do servidor
     df = pd.read_parquet(
-        url_direta, 
+        arquivo_local, 
         engine="pyarrow", 
         columns=colunas_necessarias
     )
@@ -31,7 +40,7 @@ def carregar_dados_otimizado():
     return df
 
 # Exibe animação de loading ao carregar pela primeira vez
-with st.spinner("Processando base de dados de viagens..."):
+with st.spinner("Baixando e processando base de dados do Google Drive... (Isso pode levar um momento na primeira execução)"):
     df = carregar_dados_otimizado()
 
 st.title("📊 Painel Estratégico de Vendas e Rotas")
