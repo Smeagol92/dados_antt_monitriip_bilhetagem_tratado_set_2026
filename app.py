@@ -2,35 +2,29 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import gdown
-import os
+import base64
+import io
 
 # Configuração da página para aproveitar toda a largura da tela
 st.set_page_config(page_title="Dashboard de Bilhetagem e Faturamento", layout="wide")
 
-# 1. Carregamento Otimizado de Dados com gdown
+# 1. Carregamento Otimizado via Secrets (Sem dependência de rede externa!)
 @st.cache_data
 def carregar_dados_otimizado():
-    # INSIRA APENAS O ID DO SEU GOOGLE DRIVE AQUI
-    ID_DO_ARQUIVO = "COLE_AQUI_O_SEU_ID_DO_DRIVE"
+    # Puxa a string base64 guardada com segurança nas Secrets do Streamlit
+    dados_base64 = st.secrets["DADOS_PARQUET"]
     
-    # Define um nome local temporário para o arquivo no servidor
-    arquivo_local = "dados_temporarios.parquet"
-    
-    # Se o arquivo ainda não existe no servidor local, faz o download usando gdown
-    if not os.path.exists(arquivo_local):
-        url_drive = f"https://google.com{ID_DO_ARQUIVO}"
-        # O gdown faz o download e gerencia o aviso de vírus de arquivos grandes
-        gdown.download(url_drive, arquivo_local, quiet=False)
+    # Decodifica o texto de volta para o formato binário do Parquet
+    dados_binarios = base64.b64decode(dados_base64)
     
     colunas_necessarias = [
         'data_emissao_bilhete', 'rota_unica', 'tipo_servico',
         'quantidade_bilhetes', 'valor_total', 'tipo_tarifa', 'meses_antecedencia'
     ]
     
-    # Lê o arquivo a partir do disco local do servidor
+    # O BytesIO faz o Pandas ler os bytes na memória como se fossem um arquivo físico
     df = pd.read_parquet(
-        arquivo_local, 
+        io.BytesIO(dados_binarios), 
         engine="pyarrow", 
         columns=colunas_necessarias
     )
@@ -38,6 +32,12 @@ def carregar_dados_otimizado():
     df['data_emissao_bilhete'] = pd.to_datetime(df['data_emissao_bilhete'])
     
     return df
+
+# Exibe animação de loading na primeira execução
+with st.spinner("Carregando base de dados estratégica interna..."):
+    df = carregar_dados_otimizado()
+
+# ... O RESTO DO SEU CÓDIGO DO DASHBOARD CONTINUA IGUAL ABAIXO ...
 
 # Exibe animação de loading ao carregar pela primeira vez
 with st.spinner("Baixando e processando base de dados do Google Drive... (Isso pode levar um momento na primeira execução)"):
