@@ -11,28 +11,29 @@ st.set_page_config(page_title="Dashboard de Bilhetagem e Faturamento", layout="w
 # 1. Carregamento Otimizado via Secrets (Sem dependência de rede externa!)
 @st.cache_data
 def carregar_dados_otimizado():
-    # Puxa a string base64 guardada com segurança nas Secrets do Streamlit
-    dados_base64 = st.secrets["DADOS_PARQUET"]
-    
-    # Decodifica o texto de volta para o formato binário do Parquet
-    dados_binarios = base64.b64decode(dados_base64)
-    
     colunas_necessarias = [
         'data_emissao_bilhete', 'rota_unica', 'tipo_servico',
         'quantidade_bilhetes', 'valor_total', 'tipo_tarifa', 'meses_antecedencia'
     ]
     
-    # O BytesIO faz o Pandas ler os bytes na memória como se fossem um arquivo físico
-    df = pd.read_parquet(
-        io.BytesIO(dados_binarios), 
-        engine="pyarrow", 
-        columns=colunas_necessarias
-    )
+    lista_dataframes = []
+    
+    # IMPORTANTE: Mude para range(20) para ler as 20 partes (0 a 19)
+    for i in range(20):
+        caminho_arquivo = f"data/dados_parte_{i}.parquet"
+        df_parte = pd.read_parquet(
+            caminho_arquivo,
+            engine="pyarrow",
+            columns=colunas_necessarias
+        )
+        lista_dataframes.append(df_parte)
+    
+    # Concatena todas as 20 partes de volta em um único DataFrame unificado
+    df = pd.concat(lista_dataframes, ignore_index=True)
     
     df['data_emissao_bilhete'] = pd.to_datetime(df['data_emissao_bilhete'])
     
     return df
-
 # Exibe animação de loading na primeira execução
 with st.spinner("Carregando base de dados estratégica interna..."):
     df = carregar_dados_otimizado()
