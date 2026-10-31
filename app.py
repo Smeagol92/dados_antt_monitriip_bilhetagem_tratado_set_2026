@@ -2,13 +2,11 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import base64
-import io
 
 # Configuração da página para aproveitar toda a largura da tela
 st.set_page_config(page_title="Dashboard de Bilhetagem e Faturamento", layout="wide")
 
-# 1. Carregamento Otimizado via Secrets (Sem dependência de rede externa!)
+# 1. Carregamento Inteligente por Fragmentos Locais (20 Partições)
 @st.cache_data
 def carregar_dados_otimizado():
     colunas_necessarias = [
@@ -18,9 +16,9 @@ def carregar_dados_otimizado():
     
     lista_dataframes = []
     
-    # IMPORTANTE: Mude para range(20) para ler as 20 partes (0 a 19)
-    for i in range(20):  # Ajuste o range aqui se seus arquivos forem de 1 a 20
-        caminho_arquivo = f"/data/dados_parte_{i}.parquet"
+    # Loop para ler cada uma das 20 partes (de 0 a 19)
+    for i in range(20):
+        caminho_arquivo = f"data/dados_parte_{i}.parquet"
         try:
             df_parte = pd.read_parquet(
                 caminho_arquivo,
@@ -29,25 +27,20 @@ def carregar_dados_otimizado():
             )
             lista_dataframes.append(df_parte)
         except Exception as e:
-            # Se falhar, o Streamlit vai estampar na tela qual o arquivo problemático
             st.error(f"Erro crítico ao tentar ler o arquivo: {caminho_arquivo}")
+            st.info("Dica: Certifique-se de re-subir este arquivo específico no GitHub, pois ele pode estar corrompido ou zerado.")
             st.exception(e)
-            st.stop() # Para a execução para você ver o aviso
-    
-    # Concatena todas as 20 partes de volta em um único DataFrame unificado
+            st.stop()
+            
+    # Concatena todas as partes de volta em um único DataFrame unificado
     df = pd.concat(lista_dataframes, ignore_index=True)
     
     df['data_emissao_bilhete'] = pd.to_datetime(df['data_emissao_bilhete'])
     
     return df
+
 # Exibe animação de loading na primeira execução
-with st.spinner("Carregando base de dados estratégica interna..."):
-    df = carregar_dados_otimizado()
-
-# ... O RESTO DO SEU CÓDIGO DO DASHBOARD CONTINUA IGUAL ABAIXO ...
-
-# Exibe animação de loading ao carregar pela primeira vez
-with st.spinner("Baixando e processando base de dados do Google Drive... (Isso pode levar um momento na primeira execução)"):
+with st.spinner("Reunindo fragmentos da base de dados estratégica..."):
     df = carregar_dados_otimizado()
 
 st.title("📊 Painel Estratégico de Vendas e Rotas")
@@ -86,7 +79,7 @@ df_filtrado = df[
 total_bilhetes = int(df_filtrado['quantidade_bilhetes'].sum())
 faturamento_total = float(df_filtrado['valor_total'].sum())
 
-# Cálculo do Ticket Médio Geral (Razão: faturamento / bilhetes)
+# Cálculo do Ticket Médio Geral
 ticket_medio = faturamento_total / total_bilhetes if total_bilhetes > 0 else 0.0
 
 # Porcentagem de compras em cima da hora (meses_antecedencia == 0)
