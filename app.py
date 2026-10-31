@@ -74,7 +74,7 @@ df_filtrado = df[
 ].copy()
 
 # ==========================================
-# 3. CARDS KPI (MÉTRICAS) - CORRIGIDO CONTRA TYPEERROR
+# 3. CARDS KPI (MÉTRICAS)
 # ==========================================
 total_bilhetes = int(df_filtrado['quantidade_bilhetes'].sum()) if not df_filtrado.empty else 0
 faturamento_total = float(df_filtrado['valor_total'].sum()) if not df_filtrado.empty else 0.0
@@ -126,16 +126,19 @@ if not df_filtrado.empty:
     df_temp_temporal = df_filtrado.copy()
 
     if visao_temporal == "Ano":
-        df_temp_temporal['periodo'] = df_temp_temporal['data_emissao_bilhete'].dt.to_period('Y').dt.to_timestamp()
+        df_temp_temporal['periodo'] = df_temp_temporal['data_emissao_bilhete'].dt.to_period('Y')
     elif visao_temporal == "Mês":
-        df_temp_temporal['periodo'] = df_temp_temporal['data_emissao_bilhete'].dt.to_period('M').dt.to_timestamp()
+        df_temp_temporal['periodo'] = df_temp_temporal['data_emissao_bilhete'].dt.to_period('M')
     else:
-        df_temp_temporal['periodo'] = df_temp_temporal['data_emissao_bilhete'].dt.normalize()
+        df_temp_temporal['periodo'] = df_temp_temporal['data_emissao_bilhete'].dt.date
 
     df_temporal = df_temp_temporal.groupby('periodo').agg(
         total_bilhetes=('quantidade_bilhetes', 'sum'),
         total_faturamento=('valor_total', 'sum')
     ).reset_index().sort_values('periodo')
+
+    # CORREÇÃO CRÍTICA CONTRA TYPEERROR: Converte o eixo temporal para string explicita antes do Plotly
+    df_temporal['periodo'] = df_temporal['periodo'].astype(str)
 
     fig_temporal = go.Figure()
     fig_temporal.add_trace(go.Bar(
