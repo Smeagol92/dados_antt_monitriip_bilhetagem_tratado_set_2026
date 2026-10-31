@@ -35,7 +35,12 @@ def carregar_dados_otimizado():
     # Concatena todas as partes de volta em um único DataFrame unificado
     df = pd.concat(lista_dataframes, ignore_index=True)
     
-    df['data_emissao_bilhete'] = pd.to_datetime(df['data_emissao_bilhete'])
+    # CORREÇÃO: Se a coluna já for um PeriodDtype do Pandas, convertemos direto para timestamp seguro
+    try:
+        df['data_emissao_bilhete'] = df['data_emissao_bilhete'].dt.to_timestamp()
+    except:
+        # Caso seja uma string ou outro tipo, garante a conversão para datetime padrão de forma segura
+        df['data_emissao_bilhete'] = pd.to_datetime(df['data_emissao_bilhete'], errors='coerce')
     
     return df
 
@@ -137,7 +142,7 @@ if not df_filtrado.empty:
         total_faturamento=('valor_total', 'sum')
     ).reset_index().sort_values('periodo')
 
-    # CORREÇÃO CRÍTICA CONTRA TYPEERROR: Converte o eixo temporal para string explicita antes do Plotly
+    # Converte o eixo temporal para string explicita antes do Plotly
     df_temporal['periodo'] = df_temporal['periodo'].astype(str)
 
     fig_temporal = go.Figure()
