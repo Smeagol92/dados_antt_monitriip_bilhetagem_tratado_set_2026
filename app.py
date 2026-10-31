@@ -20,7 +20,7 @@ def carregar_dados_otimizado():
     
     # IMPORTANTE: Mude para range(20) para ler as 20 partes (0 a 19)
     for i in range(20):  # Ajuste o range aqui se seus arquivos forem de 1 a 20
-        caminho_arquivo = f"dados_antt_monitriip_bilhetagem_tratado_set_2026/data/dados_parte_{i}.parquet"
+        caminho_arquivo = f"/data/dados_parte_{i}.parquet"
         try:
             df_parte = pd.read_parquet(
                 caminho_arquivo,
