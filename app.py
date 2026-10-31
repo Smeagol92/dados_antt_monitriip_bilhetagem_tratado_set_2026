@@ -19,14 +19,20 @@ def carregar_dados_otimizado():
     lista_dataframes = []
     
     # IMPORTANTE: Mude para range(20) para ler as 20 partes (0 a 19)
-    for i in range(20):
+    for i in range(20):  # Ajuste o range aqui se seus arquivos forem de 1 a 20
         caminho_arquivo = f"data/dados_parte_{i}.parquet"
-        df_parte = pd.read_parquet(
-            caminho_arquivo,
-            engine="pyarrow",
-            columns=colunas_necessarias
-        )
-        lista_dataframes.append(df_parte)
+        try:
+            df_parte = pd.read_parquet(
+                caminho_arquivo,
+                engine="pyarrow",
+                columns=colunas_necessarias
+            )
+            lista_dataframes.append(df_parte)
+        except Exception as e:
+            # Se falhar, o Streamlit vai estampar na tela qual o arquivo problemático
+            st.error(f"Erro crítico ao tentar ler o arquivo: {caminho_arquivo}")
+            st.exception(e)
+            st.stop() # Para a execução para você ver o aviso
     
     # Concatena todas as 20 partes de volta em um único DataFrame unificado
     df = pd.concat(lista_dataframes, ignore_index=True)
