@@ -3,10 +3,10 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
-# Configuração da página para aproveitar toda a largura da tela
-st.set_page_config(page_title="Dashboard de Bilhetagem e Faturamento", layout="wide")
+# Configuração de Layout expansivo
+st.set_page_config(page_title="Dashboard ANTT Monitriip", layout="wide")
 
-# 1. Carregamento Inteligente e de Baixo Consumo de Memória
+# 1. Carregamento de Alta Performance via Link de CDN Direto do GitHub
 @st.cache_data
 def carregar_dados_otimizado():
     colunas_necessarias = [
@@ -16,47 +16,33 @@ def carregar_dados_otimizado():
     
     lista_dataframes = []
     
-    # Carrega as 20 partições diminuindo o consumo de RAM em cada uma
+    # Busca dinamicamente os pedaços da raiz do seu repositório na nuvem de forma nativa
     for i in range(20):
-        caminho_arquivo = f"data/dados_parte_{i}.parquet"
+        url_raw = f"https://githubusercontent.com_{i}.parquet"
         try:
             df_parte = pd.read_parquet(
-                caminho_arquivo,
+                url_raw,
                 engine="pyarrow",
                 columns=colunas_necessarias
             )
-            
-            # OTIMIZAÇÃO DE MEMÓRIA: Downcast de tipos primitivos pesados
-            if 'quantidade_bilhetes' in df_parte.columns:
-                df_parte['quantidade_bilhetes'] = pd.to_numeric(df_parte['quantidade_bilhetes'], downcast='integer')
-            if 'valor_total' in df_parte.columns:
-                df_parte['valor_total'] = pd.to_numeric(df_parte['valor_total'], downcast='float')
-            if 'meses_antecedencia' in df_parte.columns:
-                df_parte['meses_antecedencia'] = pd.to_numeric(df_parte['meses_antecedencia'], downcast='integer')
-                
-            # Converter textos repetitivos em categorias (economiza até 80% de RAM em strings)
-            for col in ['tipo_servico', 'tipo_tarifa']:
-                if col in df_parte.columns:
-                    df_parte[col] = df_parte[col].astype('category')
-                    
             lista_dataframes.append(df_parte)
         except Exception as e:
-            st.error(f"Erro crítico no arquivo: {caminho_arquivo}")
+            st.error(f"Não foi possível processar o bloco {i}")
             st.stop()
             
     df = pd.concat(lista_dataframes, ignore_index=True)
-    del lista_dataframes # Remove referência da lista antiga imediatamente da memória
     
-    # Tratamento seguro da data para timestamp
-    try:
-        df['data_emissao_bilhete'] = df['data_emissao_bilhete'].dt.to_timestamp()
-    except:
-        df['data_emissao_bilhete'] = pd.to_datetime(df['data_emissao_bilhete'], errors='coerce')
-        
+    # Tratamento automático de tipos primitivos contra colisões de bibliotecas
+    df['quantidade_bilhetes'] = df['quantidade_bilhetes'].astype(int)
+    df['valor_total'] = df['valor_total'].astype(float)
+    df['meses_antecedencia'] = df['meses_antecedencia'].astype(int)
+    
+    # Converte o período ou data para formato de texto de forma segura e direta
+    df['data_txt'] = df['data_emissao_bilhete'].astype(str)
+    
     return df
 
-# Execução do carregamento leve
-with st.spinner("Reunindo e otimizando base de dados estratégica..."):
+with st.spinner("Conectando à base de dados ANTT/Monitriip..."):
     df = carregar_dados_otimizado()
 
 st.title("📊 Painel Estratégico de Vendas e Rotas")
@@ -67,17 +53,15 @@ st.markdown("---")
 # ==========================================
 st.sidebar.header("Filtros do Painel")
 
-# Coleta os elementos únicos convertendo de categoria para texto simples na listagem
 tarifas_disponiveis = sorted(df['tipo_tarifa'].dropna().unique().astype(str))
 tarifas_selecionadas = st.sidebar.multiselect("Tipo de Tarifa:", options=tarifas_disponiveis, default=tarifas_disponiveis)
 
 servicos_disponiveis = sorted(df['tipo_servico'].dropna().unique().astype(str))
 servicos_selecionados = st.sidebar.multiselect("Tipo de Serviço:", options=servicos_disponiveis, default=servicos_disponiveis)
 
-# Aplicação performática do filtro
 df_filtrado = df[
-    (df['tipo_tarifa'].isin(tarifas_selecionadas)) &
-    (df['tipo_servico'].isin(servicos_selecionados))
+    (df['tipo_tarifa'].astype(str).isin(tarifas_selecionadas)) &
+    (df['tipo_servico'].astype(str).isin(servicos_selecionados))
 ].copy()
 
 # ==========================================
@@ -109,23 +93,22 @@ st.markdown("---")
 # 4. GRÁFICOS E VISUALIZAÇÕES
 # ==========================================
 if not df_filtrado.empty:
-    # Bloco 1: Evolução Temporal Alternável
     st.subheader("📈 Evolução Temporal: Bilhetes vs Faturamento")
     visao_temporal = st.radio("Agrupar gráfico por:", options=["Ano", "Mês", "Dia"], index=1, horizontal=True)
 
-    df_temp_temporal = df_filtrado[['data_emissao_bilhete', 'quantidade_bilhetes', 'valor_total']].copy()
+    df_temp_temporal = df_filtrado[['data_txt', 'quantidade_bilhetes', 'valor_total']].copy()
 
     if visao_temporal == "Ano":
-        df_temp_temporal['periodo'] = df_temp_temporal['data_emissao_bilhete'].dt.to_period('Y').astype(str)
+        df_temp_temporal['periodo'] = df_temp_temporal['data_txt'].str[:4]
     elif visao_temporal == "Mês":
-        df_temp_temporal['periodo'] = df_temp_temporal['data_emissao_bilhete'].dt.to_period('M').astype(str)
+        df_temp_temporal['periodo'] = df_temp_temporal['data_txt'].str[:7]
     else:
-        df_temp_temporal['periodo'] = df_temp_temporal['data_emissao_bilhete'].dt.date.astype(str)
+        df_temp_temporal['periodo'] = df_temp_temporal['data_txt'].str[:10]
 
     df_temporal = df_temp_temporal.groupby('periodo').agg(
         total_bilhetes=('quantidade_bilhetes', 'sum'),
         total_faturamento=('valor_total', 'sum')
-    ).reset_index()
+    ).reset_index().sort_values('periodo')
 
     fig_temporal = go.Figure()
     fig_temporal.add_trace(go.Bar(x=df_temporal['periodo'], y=df_temporal['total_bilhetes'], name="Bilhetes Emitidos", yaxis="y", marker_color='#1f77b4'))
@@ -136,17 +119,14 @@ if not df_filtrado.empty:
         legend=dict(x=0.01, y=0.99), hovermode="x unified", margin=dict(l=40, r=40, t=20, b=40)
     )
     st.plotly_chart(fig_temporal, use_container_width=True)
-    del df_temp_temporal, df_temporal  # Liberação explícita de memória RAM após plotar
 
     st.markdown("---")
 
-    # Bloco 2: Linhas Movimentadas e Serviços
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("🏆 Top 10 Linhas Mais Movimentadas")
         top_linhas = df_filtrado.groupby('rota_unica')['quantidade_bilhetes'].sum().reset_index()
         top_linhas = top_linhas.sort_values(by='quantidade_bilhetes', ascending=False).head(10)
-        
         fig_linhas = px.bar(top_linhas, x='quantidade_bilhetes', y='rota_unica', orientation='h', color_discrete_sequence=['#2ca02c'])
         fig_linhas.update_layout(yaxis={'categoryorder':'total ascending'})
         st.plotly_chart(fig_linhas, use_container_width=True)
@@ -156,14 +136,12 @@ if not df_filtrado.empty:
         df_servico = df_filtrado.groupby('tipo_servico', observed=False).agg(
             Bilhetes=('quantidade_bilhetes', 'sum'), Faturamento=('valor_total', 'sum')
         ).reset_index()
-        
         visao_servico = st.radio("Visualizar Participação por:", ["Faturamento", "Bilhetes"], horizontal=True, key="servico_radio")
         fig_servico = px.pie(df_servico, values=visao_servico, names='tipo_servico', hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
         st.plotly_chart(fig_servico, use_container_width=True)
 
     st.markdown("---")
 
-    # Bloco 3: Tipo de Tarifa e Detalhe de Rotas
     col3, col4 = st.columns(2)
     with col3:
         st.subheader("🎟️ Participação por Tipo de Tarifa")
@@ -176,10 +154,8 @@ if not df_filtrado.empty:
         df_detalhe_rotas = df_filtrado.groupby('rota_unica').agg(
             Bilhetes_Emitidos=('quantidade_bilhetes', 'sum'), Faturamento_Total=('valor_total', 'sum')
         ).reset_index()
-        
         df_detalhe_rotas['Ticket_Médio'] = df_detalhe_rotas['Faturamento_Total'] / df_detalhe_rotas['Bilhetes_Emitidos']
         df_detalhe_rotas = df_detalhe_rotas.sort_values(by='Faturamento_Total', ascending=False)
-        
         st.dataframe(
             df_detalhe_rotas,
             column_config={
