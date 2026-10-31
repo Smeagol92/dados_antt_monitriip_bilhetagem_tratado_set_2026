@@ -2,11 +2,12 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import os
 
 # Configuração de Layout expansivo
 st.set_page_config(page_title="Dashboard ANTT Monitriip", layout="wide")
 
-# 1. Carregamento de Alta Performance via Link de CDN Direto do GitHub
+# 1. Carregamento Inteligente e 100% Local (Sem chamadas HTTP/URLs de internet)
 @st.cache_data
 def carregar_dados_otimizado():
     colunas_necessarias = [
@@ -16,33 +17,45 @@ def carregar_dados_otimizado():
     
     lista_dataframes = []
     
-    # Busca dinamicamente os pedaços da raiz do seu repositório na nuvem de forma nativa
+    # Loop para ler os 20 arquivos locais diretamente da pasta do projeto
     for i in range(20):
-        url_raw = f"https://githubusercontent.com_{i}.parquet"
+        caminho_local = f"data/dados_parte_{i}.parquet"
+        
+        # Proteção robusta: verifica se o arquivo realmente existe fisicamente no repositório antes de ler
+        if not os.path.exists(caminho_local):
+            st.error(f"❌ Erro Crítico: O arquivo '{caminho_local}' não foi encontrado na estrutura do repositório.")
+            st.info("Por favor, verifique se o arquivo foi incluído e enviado corretamente na pasta 'data' do GitHub.")
+            st.stop()
+            
         try:
             df_parte = pd.read_parquet(
-                url_raw,
+                caminho_local,
                 engine="pyarrow",
                 columns=colunas_necessarias
             )
+            
+            # Garante que dados parciais tenham o tamanho correto de arquivo binário
+            if df_parte.empty:
+                st.warning(f"⚠️ O arquivo {caminho_local} foi lido, mas está totalmente vazio.")
+                
             lista_dataframes.append(df_parte)
         except Exception as e:
-            st.error(f"Não foi possível processar o bloco {i}")
+            st.error(f"❌ Erro Crítico ao processar a partição local: {caminho_local}")
+            st.exception(e)
             st.stop()
             
+    # Combina as partições carregadas localmente
     df = pd.concat(lista_dataframes, ignore_index=True)
     
-    # Tratamento automático de tipos primitivos contra colisões de bibliotecas
+    # Conversões primitivas para estabilização de tipos de dados
     df['quantidade_bilhetes'] = df['quantidade_bilhetes'].astype(int)
     df['valor_total'] = df['valor_total'].astype(float)
     df['meses_antecedencia'] = df['meses_antecedencia'].astype(int)
-    
-    # Converte o período ou data para formato de texto de forma segura e direta
     df['data_txt'] = df['data_emissao_bilhete'].astype(str)
     
     return df
 
-with st.spinner("Conectando à base de dados ANTT/Monitriip..."):
+with st.spinner("Construindo e otimizando a base de dados ANTT/Monitriip local..."):
     df = carregar_dados_otimizado()
 
 st.title("📊 Painel Estratégico de Vendas e Rotas")
