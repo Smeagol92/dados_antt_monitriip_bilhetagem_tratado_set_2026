@@ -2,16 +2,17 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import requests
-import io
 
 # Configuração de Layout expansivo
-st.set_page_config(page_title="Dashboard ANTT Monitriip", layout="wide") # <-- Adicione a aspa depois de wide
+st.set_page_config(page_title="Dashboard ANTT Monitriip", layout="wide")
 
-# 1. Carregamento de Alta Performance via Google Drive API (Ignorando avisos de vírus)
+# 1. Carregamento Direto e Otimizado via Engine do Pandas (Sem usar requests)
 @st.cache_data
-def carregar_dados_otimizado():
+def carregar_dados_do_drive():
+    # ID do seu arquivo do Google Drive inserido e corrigido
     ID_DO_ARQUIVO = "1qa85xm_CmnS-gpToZXLZSwX5KWqQAQ7U"
+    
+    # URL que faz o motor do Pandas gerenciar o streaming direto do arquivo único
     url_drive = f"https://google.com{ID_DO_ARQUIVO}&export=download"
     
     colunas_necessarias = [
@@ -19,13 +20,14 @@ def carregar_dados_otimizado():
         'quantidade_bilhetes', 'valor_total', 'tipo_tarifa', 'meses_antecedencia'
     ]
     
-    # Sem usar requests! O Pandas abre o streaming direto via PyArrow
+    # O Pandas abre o fluxo de bytes via PyArrow driblando restrições comuns de rede
     df = pd.read_parquet(
         url_drive,
         engine="pyarrow",
         columns=colunas_necessarias
     )
     
+    # Garantia de tipos estruturados leves para os gráficos e cards
     df['quantidade_bilhetes'] = df['quantidade_bilhetes'].astype(int)
     df['valor_total'] = df['valor_total'].astype(float)
     df['meses_antecedencia'] = df['meses_antecedencia'].astype(int)
@@ -33,7 +35,8 @@ def carregar_dados_otimizado():
     
     return df
 
-with st.spinner("Conectando de forma segura ao Google Drive e estruturando dados..."):
+# Chamada corrigida e idêntica ao nome da função declarada acima
+with st.spinner("Conectando de forma estável ao Google Drive e estruturando dados..."):
     df = carregar_dados_do_drive()
 
 st.title("📊 Painel Estratégico de Vendas e Rotas")
