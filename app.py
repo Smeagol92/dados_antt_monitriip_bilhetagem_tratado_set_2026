@@ -6,7 +6,7 @@ import requests
 import io
 
 # Configuração de Layout expansivo
-st.set_page_config(page_title="Dashboard ANTT Monitriip", layout="wide)
+st.set_page_config(page_title="Dashboard ANTT Monitriip", layout="wide") # <-- Adicione a aspa depois de wide
 
 # 1. Carregamento de Alta Performance via Google Drive API (Ignorando avisos de vírus)
 @st.cache_data
