@@ -2,52 +2,41 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import os
+import requests
+import io
 
 # Configuração de Layout expansivo
 st.set_page_config(page_title="Dashboard ANTT Monitriip", layout="wide")
 
-# 1. Carregamento Inteligente e 100% Local (Sem chamadas HTTP/URLs de internet)
+# 1. Carregamento de Alta Performance via Google Drive API API (Sem limites do GitHub)
 @st.cache_data
-def carregar_dados_otimizado():
+def carregar_dados_do_drive():
+    # ⚠️ COLOQUE O ID DO SEU ARQUIVO DO GOOGLE DRIVE AQUI:
+    ID_DO_ARQUIVO = "1qa85xm_CmnS-gpToZXLZSwX5KWqQAQ7U"
+    
+    # URL oficial do Google que permite burlar o aviso de vírus para arquivos grandes
+    URL_BASE = "https://google.com"
+    
     colunas_necessarias = [
         'data_emissao_bilhete', 'rota_unica', 'tipo_servico',
         'quantidade_bilhetes', 'valor_total', 'tipo_tarifa', 'meses_antecedencia'
     ]
     
-    lista_dataframes = []
+    # Cria uma sessão HTTP estável para baixar o arquivo grande em blocos na memória RAM
+    session = requests.Session()
+    resposta = session.get(URL_BASE, params={"id": ID_DO_ARQUIVO}, stream=True)
     
-    # Loop para ler os 20 arquivos locais diretamente da pasta do projeto
-    for i in range(20):
-        caminho_local = f"data/dados_parte_{i}.parquet"
-        
-        # Proteção robusta: verifica se o arquivo realmente existe fisicamente no repositório antes de ler
-        if not os.path.exists(caminho_local):
-            st.error(f"❌ Erro Crítico: O arquivo '{caminho_local}' não foi encontrado na estrutura do repositório.")
-            st.info("Por favor, verifique se o arquivo foi incluído e enviado corretamente na pasta 'data' do GitHub.")
-            st.stop()
-            
-        try:
-            df_parte = pd.read_parquet(
-                caminho_local,
-                engine="pyarrow",
-                columns=colunas_necessarias
-            )
-            
-            # Garante que dados parciais tenham o tamanho correto de arquivo binário
-            if df_parte.empty:
-                st.warning(f"⚠️ O arquivo {caminho_local} foi lido, mas está totalmente vazio.")
-                
-            lista_dataframes.append(df_parte)
-        except Exception as e:
-            st.error(f"❌ Erro Crítico ao processar a partição local: {caminho_local}")
-            st.exception(e)
-            st.stop()
-            
-    # Combina as partições carregadas localmente
-    df = pd.concat(lista_dataframes, ignore_index=True)
+    # Transforma os bytes baixados diretamente em um buffer de arquivo na memória
+    arquivo_em_memoria = io.BytesIO(resposta.content)
     
-    # Conversões primitivas para estabilização de tipos de dados
+    # O PyArrow lê os metadados do Parquet direto da memória sem salvar nada no disco do servidor
+    df = pd.read_parquet(
+        arquivo_em_memoria,
+        engine="pyarrow",
+        columns=colunas_necessarias
+    )
+    
+    # Otimização fina de tipos primitivos (Garante leveza nos filtros e gráficos)
     df['quantidade_bilhetes'] = df['quantidade_bilhetes'].astype(int)
     df['valor_total'] = df['valor_total'].astype(float)
     df['meses_antecedencia'] = df['meses_antecedencia'].astype(int)
@@ -55,8 +44,8 @@ def carregar_dados_otimizado():
     
     return df
 
-with st.spinner("Construindo e otimizando a base de dados ANTT/Monitriip local..."):
-    df = carregar_dados_otimizado()
+with st.spinner("Conectando à API do Google Drive e otimizando dados em tempo real..."):
+    df = carregar_dados_do_drive()
 
 st.title("📊 Painel Estratégico de Vendas e Rotas")
 st.markdown("---")
