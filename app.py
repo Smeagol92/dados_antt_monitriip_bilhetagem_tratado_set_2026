@@ -6,37 +6,37 @@ import requests
 import io
 
 # Configuração de Layout expansivo
-st.set_page_config(page_title="Dashboard ANTT Monitriip", layout="wide")
+st.set_page_config(page_title="Dashboard ANTT Monitriip", layout="wide)
 
-# 1. Carregamento de Alta Performance via Google Drive API API (Sem limites do GitHub)
+# 1. Carregamento de Alta Performance via Google Drive API (Ignorando avisos de vírus)
 @st.cache_data
 def carregar_dados_do_drive():
     # ⚠️ COLOQUE O ID DO SEU ARQUIVO DO GOOGLE DRIVE AQUI:
-    ID_DO_ARQUIVO = "1qa85xm_CmnS-gpToZXLZSwX5KWqQAQ7U"
+    ID_DO_ARQUIVO = "19Bhqiqta2gFCm3I2uMzkVvgezAjUOoKJ"
     
-    # URL oficial do Google que permite burlar o aviso de vírus para arquivos grandes
-    URL_BASE = "https://google.com"
+    # URL atualizada do Google Drive que aceita o parâmetro confirm=t para ignorar telas de aviso (>100MB)
+    url_direta = f"https://usercontent.com{ID_DO_ARQUIVO}&confirm=t"
     
     colunas_necessarias = [
         'data_emissao_bilhete', 'rota_unica', 'tipo_servico',
         'quantidade_bilhetes', 'valor_total', 'tipo_tarifa', 'meses_antecedencia'
     ]
     
-    # Cria uma sessão HTTP estável para baixar o arquivo grande em blocos na memória RAM
+    # Cria uma sessão estável para baixar o streaming de bytes binários puro
     session = requests.Session()
-    resposta = session.get(URL_BASE, params={"id": ID_DO_ARQUIVO}, stream=True)
+    resposta = session.get(url_direta, stream=True)
     
-    # Transforma os bytes baixados diretamente em um buffer de arquivo na memória
+    # Transforma os bytes recebidos em um buffer de arquivo legível em memória RAM
     arquivo_em_memoria = io.BytesIO(resposta.content)
     
-    # O PyArrow lê os metadados do Parquet direto da memória sem salvar nada no disco do servidor
+    # O PyArrow lê os metadados diretamente da memória sem salvar arquivos locais em disco
     df = pd.read_parquet(
         arquivo_em_memoria,
         engine="pyarrow",
         columns=colunas_necessarias
     )
     
-    # Otimização fina de tipos primitivos (Garante leveza nos filtros e gráficos)
+    # Padronização e estabilização rígida de tipos primitivos para o portfólio
     df['quantidade_bilhetes'] = df['quantidade_bilhetes'].astype(int)
     df['valor_total'] = df['valor_total'].astype(float)
     df['meses_antecedencia'] = df['meses_antecedencia'].astype(int)
@@ -44,7 +44,7 @@ def carregar_dados_do_drive():
     
     return df
 
-with st.spinner("Conectando à API do Google Drive e otimizando dados em tempo real..."):
+with st.spinner("Conectando de forma segura ao Google Drive e estruturando dados..."):
     df = carregar_dados_do_drive()
 
 st.title("📊 Painel Estratégico de Vendas e Rotas")
