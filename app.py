@@ -10,33 +10,22 @@ st.set_page_config(page_title="Dashboard ANTT Monitriip", layout="wide") # <-- A
 
 # 1. Carregamento de Alta Performance via Google Drive API (Ignorando avisos de vírus)
 @st.cache_data
-def carregar_dados_do_drive():
-    # ⚠️ COLOQUE O ID DO SEU ARQUIVO DO GOOGLE DRIVE AQUI:
-    ID_DO_ARQUIVO = "19Bhqiqta2gFCm3I2uMzkVvgezAjUOoKJ"
-    
-    # URL atualizada do Google Drive que aceita o parâmetro confirm=t para ignorar telas de aviso (>100MB)
-    url_direta = f"https://usercontent.com{ID_DO_ARQUIVO}&confirm=t"
+def carregar_dados_otimizado():
+    ID_DO_ARQUIVO = "1qa85xm_CmnS-gpToZXLZSwX5KWqQAQ7U"
+    url_drive = f"https://google.com{ID_DO_ARQUIVO}&export=download"
     
     colunas_necessarias = [
         'data_emissao_bilhete', 'rota_unica', 'tipo_servico',
         'quantidade_bilhetes', 'valor_total', 'tipo_tarifa', 'meses_antecedencia'
     ]
     
-    # Cria uma sessão estável para baixar o streaming de bytes binários puro
-    session = requests.Session()
-    resposta = session.get(url_direta, stream=True)
-    
-    # Transforma os bytes recebidos em um buffer de arquivo legível em memória RAM
-    arquivo_em_memoria = io.BytesIO(resposta.content)
-    
-    # O PyArrow lê os metadados diretamente da memória sem salvar arquivos locais em disco
+    # Sem usar requests! O Pandas abre o streaming direto via PyArrow
     df = pd.read_parquet(
-        arquivo_em_memoria,
+        url_drive,
         engine="pyarrow",
         columns=colunas_necessarias
     )
     
-    # Padronização e estabilização rígida de tipos primitivos para o portfólio
     df['quantidade_bilhetes'] = df['quantidade_bilhetes'].astype(int)
     df['valor_total'] = df['valor_total'].astype(float)
     df['meses_antecedencia'] = df['meses_antecedencia'].astype(int)
