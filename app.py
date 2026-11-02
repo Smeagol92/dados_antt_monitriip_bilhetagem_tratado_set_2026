@@ -7,10 +7,10 @@ from supabase import create_client
 # Configuração de Layout expansivo
 st.set_page_config(page_title="Dashboard ANTT Monitriip", layout="wide")
 
-# 1. Conexão estável e performática com a Nuvem do Supabase
-@st.cache_data(ttl=600) # Mantém cache por 10 minutos
+# 1. Conexão estável com Paginação Automática e Ordenação Segura
+@st.cache_data(ttl=3600) # Mantém cache por 1 hora para máxima performance
 def carregar_dados_do_banco():
-    # Suas credenciais oficiais do Supabase (mantenha as que funcionaram nos cards)
+    # ⚠️ Mantenha as suas credenciais oficiais do Supabase aqui
     URL = "https://czloymgdsmjysuomyvcm.supabase.co"
     KEY = "sb_publishable_QemcKKUNYxrMcqaXziH4tA_0PI2c4Ka"
     supabase = create_client(URL, KEY)
@@ -22,13 +22,14 @@ def carregar_dados_do_banco():
     # Criamos um container de aviso visual temporário para o usuário acompanhar o carregamento
     status_progresso = st.empty()
     
-    # Loop de Paginação Infalível: busca dados até a API do Supabase voltar vazia
+    # Loop de Paginação: busca dados até a API do Supabase voltar vazia
     while True:
         status_progresso.text(f"📥 Coletando dados do Supabase... Registros processados: {offset:,}".replace(",", "."))
         
+        # CORREÇÃO CRÍTICA: Adicionado .order("id") para garantir estabilidade na paginação do PostgreSQL
         resposta = supabase.table("bilhetagem_antt").select(
             "ano_emissao_bilhete, tipo_servico, tipo_tarifa, quantidade_bilhetes, valor_total"
-        ).range(offset, offset + tamanho_pagina - 1).execute()
+        ).order("id").range(offset, offset + tamanho_pagina - 1).execute()
         
         dados_pagina = resposta.data
         
@@ -38,7 +39,7 @@ def carregar_dados_do_banco():
         lista_registros.extend(dados_pagina)
         offset += tamanho_pagina
         
-        # Trava de segurança para portfólio (limita a busca em lotes para evitar estouro de RAM no Streamlit)
+        # Trava de segurança para evitar estouro de RAM no Streamlit Cloud gratuito
         if offset >= 1500000: 
             break
             
