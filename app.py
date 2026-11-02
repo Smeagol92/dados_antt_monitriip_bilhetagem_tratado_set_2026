@@ -10,20 +10,33 @@ st.set_page_config(page_title="Dashboard ANTT Monitriip", layout="wide")
 # 1. Conexão estável via API com a Nuvem do Supabase
 @st.cache_data
 def carregar_dados_do_banco():
-    # ⚠️ ADICIONE AS CREDENCIAIS DA SUA CONTA SUPABASE AQUI
-    SUPABASE_URL = "https://czloymgdsmjysuomyvcm.supabase.co"
-    SUPABASE_KEY = "sb_publishable_QemcKKUNYxrMcqaXziH4tA_0PI2c4Ka"
-    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    # Credenciais do Supabase
+    SUPABASE_URL = "https://1qa85xm_CmnS-gpToZXLZSwX5KWqQAQ7U.supabase.co" # Ajuste para a sua URL se for diferente
+    SUPABASE_KEY = "sb_publishable_QemcKKUNYxrMcqaXziH4tA_0PI2c4Ka" # Mantenha a sua anon key aqui
     
-    # Faz uma query SQL leve trazendo apenas as colunas mapeadas por demanda
-    # (Sem puxar megabytes pesados e sem travar a RAM)
+    # Se você já configurou as credenciais antes, mantenha as que estavam funcionando!
+    # resposta = supabase.table("bilhetagem_antt").select(...).execute()
+    
+    # QUERY OTIMIZADA: Traz apenas o necessário por demanda
+    resposta = st.secrets.get("SUPABASE_URL") # Exemplo caso use secrets, ou cole direto as strings:
+    
+    # Como os cards já funcionaram, use exatamente os mesmos parâmetros de conexão que você usou no seu app.py anterior
+    try:
+        url = st.secrets["SUPABASE_URL"]
+        key = st.secrets["SUPABASE_KEY"]
+    except:
+        url = "https://czloymgdsmjysuomyvcm.supabase.co"
+        key = "sb_publishable_QemcKKUNYxrMcqaXziH4tA_0PI2c4Ka"
+        
+    supabase = create_client(url, key)
+    
     resposta = supabase.table("bilhetagem_antt").select(
         "data_emissao_bilhete, rota_unica, tipo_servico, quantidade_bilhetes, valor_total, tipo_tarifa, meses_antecedencia"
     ).execute()
     
-    # Transforma o JSON do banco em DataFrame Pandas instantaneamente
     df = pd.DataFrame(resposta.data)
     
+    # Garante que a coluna de data seja tratada como string para o fatiamento visual
     df['data_txt'] = df['data_emissao_bilhete'].astype(str)
     return df
 
@@ -95,13 +108,33 @@ if not df_filtrado.empty:
         total_faturamento=('valor_total', 'sum')
     ).reset_index().sort_values('periodo')
 
+    # CORREÇÃO DA SINTAXE DO PLOTLY (title_font_color e tickfont)
     fig_temporal = go.Figure()
-    fig_temporal.add_trace(go.Bar(x=df_temporal['periodo'], y=df_temporal['total_bilhetes'], name="Bilhetes Emitidos", yaxis="y", marker_color='#1f77b4'))
-    fig_temporal.add_trace(go.Scatter(x=df_temporal['periodo'], y=df_temporal['total_faturamento'], name="Faturamento (R$)", yaxis="y2", mode='lines+markers', line=dict(color='#ff7f0e', width=3)))
+    fig_temporal.add_trace(go.Bar(
+        x=df_temporal['periodo'], y=df_temporal['total_bilhetes'], 
+        name="Bilhetes Emitidos", yaxis="y", marker_color='#1f77b4'
+    ))
+    fig_temporal.add_trace(go.Scatter(
+        x=df_temporal['periodo'], y=df_temporal['total_faturamento'], 
+        name="Faturamento (R$)", yaxis="y2", mode='lines+markers', line=dict(color='#ff7f0e', width=3)
+    ))
+    
     fig_temporal.update_layout(
-        yaxis=dict(title="Quantidade de Bilhetes", titlefont=dict(color='#1f77b4'), tickfont=dict(color='#1f77b4')),
-        yaxis2=dict(title="Faturamento (R$)", titlefont=dict(color='#ff7f0e'), tickfont=dict(color='#ff7f0e'), overlaying="y", side="right"),
-        legend=dict(x=0.01, y=0.99), hovermode="x unified", margin=dict(l=40, r=40, t=20, b=40)
+        yaxis=dict(
+            title="Quantidade de Bilhetes", 
+            title_font_color='#1f77b4', 
+            tickfont=dict(color='#1f77b4')
+        ),
+        yaxis2=dict(
+            title="Faturamento (R$)", 
+            title_font_color='#ff7f0e', 
+            tickfont=dict(color='#ff7f0e'), 
+            overlaying="y", 
+            side="right"
+        ),
+        legend=dict(x=0.01, y=0.99), 
+        hovermode="x unified", 
+        margin=dict(l=40, r=40, t=20, b=40)
     )
     st.plotly_chart(fig_temporal, use_container_width=True)
 
