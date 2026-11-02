@@ -2,44 +2,35 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from supabase import create_client
 
 # Configuração de Layout expansivo
 st.set_page_config(page_title="Dashboard ANTT Monitriip", layout="wide")
 
-# 1. Carregamento Direto e Otimizado via Engine do Pandas (Sem usar requests)
+# 1. Conexão estável via API com a Nuvem do Supabase
 @st.cache_data
-def carregar_dados_do_drive():
-    # ID do seu arquivo do Google Drive inserido e corrigido
-    ID_DO_ARQUIVO = "1qa85xm_CmnS-gpToZXLZSwX5KWqQAQ7U"
+def carregar_dados_do_banco():
+    # ⚠️ ADICIONE AS CREDENCIAIS DA SUA CONTA SUPABASE AQUI
+    SUPABASE_URL = "https://czloymgdsmjysuomyvcm.supabase.co"
+    SUPABASE_KEY = "sb_publishable_QemcKKUNYxrMcqaXziH4tA_0PI2c4Ka"
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
     
-    # URL que faz o motor do Pandas gerenciar o streaming direto do arquivo único
-    url_drive = f"https://google.com{ID_DO_ARQUIVO}&export=download"
+    # Faz uma query SQL leve trazendo apenas as colunas mapeadas por demanda
+    # (Sem puxar megabytes pesados e sem travar a RAM)
+    resposta = supabase.table("bilhetagem_antt").select(
+        "data_emissao_bilhete, rota_unica, tipo_servico, quantidade_bilhetes, valor_total, tipo_tarifa, meses_antecedencia"
+    ).execute()
     
-    colunas_necessarias = [
-        'data_emissao_bilhete', 'rota_unica', 'tipo_servico',
-        'quantidade_bilhetes', 'valor_total', 'tipo_tarifa', 'meses_antecedencia'
-    ]
+    # Transforma o JSON do banco em DataFrame Pandas instantaneamente
+    df = pd.DataFrame(resposta.data)
     
-    # O Pandas abre o fluxo de bytes via PyArrow driblando restrições comuns de rede
-    df = pd.read_parquet(
-        url_drive,
-        engine="pyarrow",
-        columns=colunas_necessarias
-    )
-    
-    # Garantia de tipos estruturados leves para os gráficos e cards
-    df['quantidade_bilhetes'] = df['quantidade_bilhetes'].astype(int)
-    df['valor_total'] = df['valor_total'].astype(float)
-    df['meses_antecedencia'] = df['meses_antecedencia'].astype(int)
     df['data_txt'] = df['data_emissao_bilhete'].astype(str)
-    
     return df
 
-# Chamada corrigida e idêntica ao nome da função declarada acima
-with st.spinner("Conectando de forma estável ao Google Drive e estruturando dados..."):
-    df = carregar_dados_do_drive()
+with st.spinner("Conectando de forma segura ao banco de dados Supabase em tempo real..."):
+    df = carregar_dados_do_banco()
 
-st.title("📊 Painel Estratégico de Vendas e Rotas")
+st.title("📊 Painel Estratégico de Vendas e Rotas (Supabase Cloud)")
 st.markdown("---")
 
 # ==========================================
