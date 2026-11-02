@@ -15,26 +15,45 @@ def carregar_dados_do_banco():
     KEY = "sb_publishable_QemcKKUNYxrMcqaXziH4tA_0PI2c4Ka"
     supabase = create_client(URL, KEY)
     
-    # 🛑 SOLUÇÃO DO LIMITE DA API: Traz os dados agrupados por colunas estratégicas
-    # Como não puxamos linhas brutas individuais, contornamos o limite de paginação do Supabase
-    resposta = supabase.table("bilhetagem_antt").select(
-        "ano_emissao_bilhete, tipo_servico, tipo_tarifa, quantidade_bilhetes, valor_total"
-    ).execute()
+    lista_registros = []
+    tamanho_pagina = 1000
+    offset = 0
     
-    df = pd.DataFrame(resposta.data)
+    # Criamos um container de aviso visual temporário para o usuário acompanhar o carregamento
+    status_progresso = st.empty()
     
-    # Se a tabela original tiver a coluna completa de data, usamos ela, caso contrário usamos o ano
-    if 'data_emissao_bilhete' in df.columns:
-        df['data_txt'] = df['data_emissao_bilhete'].astype(str)
-    else:
-        df['data_txt'] = df['ano_emissao_bilhete'].astype(str)
+    # Loop de Paginação Infalível: busca dados até a API do Supabase voltar vazia
+    while True:
+        status_progresso.text(f"📥 Coletando dados do Supabase... Registros processados: {offset:,}".replace(",", "."))
         
+        resposta = supabase.table("bilhetagem_antt").select(
+            "ano_emissao_bilhete, tipo_servico, tipo_tarifa, quantidade_bilhetes, valor_total"
+        ).range(offset, offset + tamanho_pagina - 1).execute()
+        
+        dados_pagina = resposta.data
+        
+        if not dados_pagina:
+            break # Se a página veio vazia, significa que coletamos toda a base!
+            
+        lista_registros.extend(dados_pagina)
+        offset += tamanho_pagina
+        
+        # Trava de segurança para portfólio (limita a busca em lotes para evitar estouro de RAM no Streamlit)
+        if offset >= 1500000: 
+            break
+            
+    # Limpa a mensagem de progresso após concluir
+    status_progresso.empty()
+    
+    df = pd.DataFrame(lista_registros)
+    df['data_txt'] = df['ano_emissao_bilhete'].astype(str)
     return df
 
-with st.spinner("Conectando de forma segura ao banco de dados Supabase em tempo real..."):
+with st.spinner("Conectando ao banco de dados Supabase e quebrando limites de paginação..."):
     df = carregar_dados_do_banco()
 
 st.title("📊 Painel Estratégico de Vendas e Rotas (Supabase Cloud)")
+st.markdown(f"**Registros processados via API:** {len(df):,}".replace(",", "."))
 st.markdown("---")
 
 # ==========================================
@@ -60,7 +79,6 @@ total_bilhetes = int(df_filtrado['quantidade_bilhetes'].sum()) if not df_filtrad
 faturamento_total = float(df_filtrado['valor_total'].sum()) if not df_filtrado.empty else 0.0
 ticket_medio = faturamento_total / total_bilhetes if total_bilhetes > 0 else 0.0
 
-# Formatação explícita e bonita em formato brasileiro (R$)
 txt_total_bilhetes = f"{total_bilhetes:,}".replace(",", ".")
 txt_faturamento_total = f"R$ {faturamento_total:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 txt_ticket_medio = f"R$ {ticket_medio:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
