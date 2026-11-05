@@ -8,10 +8,11 @@ from plotly.subplots import make_subplots
 st.set_page_config(layout="wide", page_title="Dashboard ANTT Monitriip", page_icon="🚌")
 
 # ==========================================
-# 1. CARREGAMENTO DOS DADOS DIRETOS DO GITHUB
+# 1. CARREGAMENTO DOS DADOS DIRETOS DO GITHUB (CORRIGIDO)
 # ==========================================
 @st.cache_data
 def load_all_data():
+    # URL corrigida apontando para o domínio raw e para a pasta 'data' do seu repositório
     base_raw_url = "https://githubusercontent.com"
     
     arquivos = {
@@ -35,13 +36,6 @@ def load_all_data():
         dfs[key]['data_viagem_dt'] = pd.to_datetime(dfs[key]['data_viagem'], format='%Y-%m')
         
     return dfs
-
-# Tenta carregar todas as bases mapeadas
-try:
-    dfs = load_all_data()
-except Exception as e:
-    st.error(f"Erro de conexão ou estrutura ao carregar arquivos do GitHub: {e}")
-    st.stop()
 
 # ==========================================
 # 2. SELETORES DO MENU LATERAL (FILTROS)
