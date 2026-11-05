@@ -8,14 +8,13 @@ from plotly.subplots import make_subplots
 st.set_page_config(layout="wide", page_title="Dashboard ANTT Monitriip", page_icon="🚌")
 
 # ==========================================
-# 1. CARREGAMENTO DOS DADOS DIRETOS DO GITHUB (CORRIGIDO)
+# 1. CARREGAMENTO DOS DADOS (LINKS REAIS RAW)
 # ==========================================
 @st.cache_data
 def load_all_data():
-    # URL RAW oficial e exata para a pasta 'data' do seu repositório no GitHub
-    base_raw_url = "https://githubusercontent.com"
+    # URL Base corrigida para o formato Raw do seu repositório
+    base_raw_url = "https://github.com/Smeagol92/dados_antt_monitriip_bilhetagem_tratado_set_2026/tree/main/data"
     
-    # Dicionário mapeado exatamente com os arquivos existentes no seu GitHub
     arquivos = {
         "geral": "tabela_data_viagem_geral.csv",
         "destino_uf": "tabela_ponto_destino_viagem_uf.csv",
@@ -63,7 +62,7 @@ if data_inicio_dt > data_fim_dt:
     st.sidebar.error("A Data Início não pode ser posterior à Data Fim.")
     st.stop()
 
-# Filtros das Tabelas Customizadas
+# Opções para os filtros adicionais baseados nos dados reais
 filtro_ambito = st.sidebar.multiselect("Âmbito da Viagem", options=dfs["ambito"]["estadual_interestadual"].unique())
 filtro_antecedencia = st.sidebar.multiselect("Meses de Antecedência", options=sorted(dfs["antecedencia"]["meses_antecedencia"].unique()))
 filtro_nacionalidade = st.sidebar.multiselect("Nacionalidade", options=dfs["nacionalidade"]["nacional_internacional"].unique())
@@ -74,12 +73,51 @@ filtro_servico = st.sidebar.multiselect("Tipo de Serviço", options=dfs["servico
 filtro_tarifa = st.sidebar.multiselect("Tipo de Tarifa", options=dfs["tarifa"]["tipo_tarifa"].unique())
 
 # ==========================================
-# 3. FILTRAGEM TEMPORAL DOS DATAFRAMES
+# 3. LÓGICA DE FILTRAGEM CRUZADA EM TEMPO REAL
 # ==========================================
-dfs_f = {}
-for key, df in dfs.items():
-    mask = (df['data_viagem_dt'] >= data_inicio_dt) & (df['data_viagem_dt'] <= data_fim_dt)
-    dfs_f[key] = df[mask].copy()
+def aplicar_filtros(df, coluna_especifica=None, valor_filtro=None):
+    # Primeiro passo: Filtro de tempo (comum a todas as tabelas)
+    df_f = df[(df['data_viagem_dt'] >= data_inicio_dt) & (df['data_viagem_dt'] <= data_fim_dt)].copy()
+    
+    # Segundo passo: Aplica o filtro categórico se a coluna existir na tabela atual
+    if coluna_especifica and valor_filtro:
+        if coluna_especifica in df_f.columns:
+            df_f = df_f[df_f[coluna_uf].isin(valor_filtro)]
+            
+    return df_f
+
+# Criando dicionário com dataframes filtrados individualmente por categoria + tempo
+dfs_f = {
+    "geral": aplicar_filtros(dfs["geral"]),
+    "destino_uf": aplicar_filtros(dfs["destino_uf"], "ponto_destino_viagem_uf", filtro_destino),
+    "origem_uf": aplicar_filtros(dfs["origem_uf"], "ponto_origem_viagem_uf", filtro_origem),
+    "rota_unica": aplicar_filtros(dfs["rota_unica"]),
+    "tarifa": aplicar_filtros(dfs["tarifa"], "tipo_tarifa", filtro_tarifa),
+    "nacionalidade": aplicar_filtros(dfs["nacionalidade"], "nacional_internacional", filtro_nacionalidade),
+    "antecedencia": aplicar_filtros(dfs["antecedencia"], "meses_antecedencia", filtro_antecedencia),
+    "ambito": aplicar_filtros(dfs["ambito"], "estadual_interestadual", filtro_ambito),
+    "gratuidade": aplicar_filtros(dfs["gratuidade"], "tipo_gratuidade", filtro_gratuidade),
+    "servico": aplicar_filtros(dfs["servico"], "tipo_servico", filtro_servico)
+}
+
+# Sincronização dos filtros categóricos cruzados para os Cards de KPI
+# Filtramos a tabela Geral pelas chaves de data das tabelas que sofreram filtros categóricos
+datas_validas = set(dfs_f["geral"]["data_viagem"])
+
+if filtro_ambito:
+    datas_validas &= set(dfs_f["ambito"]["data_viagem"])
+if filtro_antecedencia:
+    datas_validas &= set(dfs_f["antecedencia"]["data_viagem"])
+if filtro_nacionalidade:
+    datas_validas &= set(dfs_f["nacionalidade"]["data_viagem"])
+if filtro_gratuidade:
+    datas_validas &= set(dfs_f["gratuidade"]["data_viagem"])
+if filtro_servico:
+    datas_validas &= set(dfs_f["servico"]["data_viagem"])
+if filtro_tarifa:
+    datas_validas &= set(dfs_f["tarifa"]["data_viagem"])
+
+df_g_kpi = dfs_f["geral"][dfs_f["geral"]["data_viagem"].isin(datas_validas)]
 
 # ==========================================
 # 4. CARDS DE INDICADORES (KPIs)
@@ -87,16 +125,19 @@ for key, df in dfs.items():
 st.title("🚌 ANTT - Painel de Controle de Bilhetagem Monitriip")
 st.markdown("---")
 
-df_g = dfs_f["geral"]
-total_bilhetes = df_g["total_bilhetes"].sum() if not df_g.empty else 0
-total_arrecadacao = df_g["total_arrecadacao"].sum() if not df_g.empty else 0
+total_bilhetes = df_g_kpi["total_bilhetes"].sum() if not df_g_kpi.empty else 0
+total_arrecadacao = df_g_kpi["total_arrecadacao"].sum() if not df_g_kpi.empty else 0
 ticket_medio = total_arrecadacao / total_bilhetes if total_bilhetes > 0 else 0
 
 # Taxa de aquisição em cima da hora (Meses Antecedência = 0)
 df_ant = dfs_f["antecedencia"]
-total_ant = df_ant["total_bilhetes"].sum() if not df_ant.empty else 0
-cima_hora = df_ant[df_ant["meses_antecedencia"] == 0]["total_bilhetes"].sum() if not df_ant.empty else 0
-pct_cima_hora = (cima_hora / total_ant * 100) if total_ant > 0 else 0
+if not df_ant.empty and "data_viagem" in df_ant.columns:
+    df_ant_kpi = df_ant[df_ant["data_viagem"].isin(datas_validas)]
+    total_ant = df_ant_kpi["total_bilhetes"].sum()
+    cima_hora = df_ant_kpi[df_ant_kpi["meses_antecedencia"] == 0]["total_bilhetes"].sum()
+    pct_cima_hora = (cima_hora / total_ant * 100) if total_ant > 0 else 0
+else:
+    pct_cima_hora = 0
 
 kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 kpi1.metric("Soma de Bilhetes", f"{total_bilhetes:,.0f}".replace(",", "."))
@@ -113,33 +154,34 @@ col_g1, col_g2 = st.columns(2)
 
 with col_g1:
     st.subheader("📈 Linha do Tempo: Bilhetes Emitidos vs Faturamento Arrecadado")
-    if not df_g.empty:
-        df_ev = df_g.groupby("data_viagem").agg({"total_bilhetes": "sum", "total_arrecadacao": "sum"}).reset_index()
+    df_ev_base = dfs_f["geral"][dfs_f["geral"]["data_viagem"].isin(datas_validas)]
+    if not df_ev_base.empty:
+        df_ev = df_ev_base.groupby("data_viagem").agg({"total_bilhetes": "sum", "total_arrecadacao": "sum"}).reset_index()
         fig_ev = make_subplots(specs=[[{"secondary_y": True}]])
         fig_ev.add_trace(go.Bar(x=df_ev["data_viagem"], y=df_ev["total_bilhetes"], name="Bilhetes", marker_color="#1D3557"), secondary_y=False)
         fig_ev.add_trace(go.Scatter(x=df_ev["data_viagem"], y=df_ev["total_arrecadacao"], name="Faturamento", line=dict(color="#E63946", width=3)), secondary_y=True)
         fig_ev.update_layout(legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
         st.plotly_chart(fig_ev, use_container_width=True)
     else:
-        st.info("Sem registros para o intervalo de tempo selecionado.")
+        st.info("Sem registros para o intervalo de tempo e filtros selecionados.")
 
 with col_g2:
     st.subheader("🚌 Top 10 Rotas Únicas com Maior Fluxo")
-    df_rotas = dfs_f["rota_unica"]
+    df_rotas = dfs_f["rota_unica"][dfs_f["rota_unica"]["data_viagem"].isin(datas_validas)]
     if not df_rotas.empty:
         df_rt_g = df_rotas.groupby("rota_unica")["total_bilhetes"].sum().reset_index()
         df_rt_g = df_rt_g.sort_values(by="total_bilhetes", ascending=True).tail(10)
         fig_rt = px.bar(df_rt_g, x="total_bilhetes", y="rota_unica", orientation="h", color_discrete_sequence=["#457B9D"])
         st.plotly_chart(fig_rt, use_container_width=True)
     else:
-        st.info("Sem registros de rotas para o período.")
+        st.info("Sem registros de rotas para o período e filtros atuais.")
 
 st.markdown("---")
 col_g3, col_g4, col_g5 = st.columns(3)
 
 with col_g3:
     st.subheader("🎫 Divisão por Tipo de Tarifa")
-    df_tf = dfs_f["tarifa"]
+    df_tf = dfs_f["tarifa"][dfs_f["tarifa"]["data_viagem"].isin(datas_validas)]
     if not df_tf.empty:
         df_tf_g = df_tf.groupby("tipo_tarifa")["total_bilhetes"].sum().reset_index()
         fig_tf = px.pie(df_tf_g, values="total_bilhetes", names="tipo_tarifa", hole=0.3, color_discrete_sequence=px.colors.qualitative.Pastel)
@@ -150,22 +192,6 @@ with col_g3:
 
 with col_g4:
     st.subheader("🌎 Proporção de Nacionalidade")
-    df_nac = dfs_f["nacionalidade"]
+    df_nac = dfs_f["nacionalidade"][dfs_f["nacionalidade"]["data_viagem"].isin(datas_validas)]
     if not df_nac.empty:
         df_nac_g = df_nac.groupby("nacional_internacional")["total_bilhetes"].sum().reset_index()
-        fig_nac = px.pie(df_nac_g, values="total_bilhetes", names="nacional_internacional", hole=0.3, color_discrete_sequence=["#2A9D8F", "#E76F51"])
-        fig_nac.update_layout(legend=dict(orientation="h", y=-0.1))
-        st.plotly_chart(fig_nac, use_container_width=True)
-    else:
-        st.info("Sem dados disponíveis para nacionalidade.")
-
-with col_g5:
-    st.subheader("📍 Participação por Estado (Destino)")
-    df_dest = dfs_f["destino_uf"]
-    if not df_dest.empty:
-        df_dst_g = df_dest.groupby("ponto_destino_viagem_uf")["total_bilhetes"].sum().reset_index()
-        df_dst_g = df_dst_g.sort_values(by="total_bilhetes", ascending=False).head(10)
-        fig_dest = px.bar(df_dst_g, x="ponto_destino_viagem_uf", y="total_bilhetes", color_discrete_sequence=["#F4A261"])
-        st.plotly_chart(fig_dest, use_container_width=True)
-    else:
-        st.info("Sem dados disponíveis para os estados de destino.")
