@@ -8,7 +8,7 @@ from plotly.subplots import make_subplots
 st.set_page_config(layout="wide", page_title="Dashboard ANTT Monitriip", page_icon="🚌")
 
 # ==========================================
-# 1. CARREGAMENTO DOS DADOS (URL REAIS RAW)
+# 1. CARREGAMENTO DOS DADOS (URL RAW CORRIGIDA)
 # ==========================================
 @st.cache_data
 def load_all_data():
@@ -191,14 +191,3 @@ with col_g4:
         st.plotly_chart(fig_nac, use_container_width=True)
     else:
         st.info("Sem dados disponíveis para nacionalidade.")
-
-with col_g5:
-    st.subheader("📍 Participação por Estado (Destino)")
-    df_dest = dfs_f["destino_uf"][dfs_f["destino_uf"]["data_viagem"].isin(datas_validas)]
-    if not df_dest.empty:
-        df_dst_g = df_dest.groupby("ponto_destino_viagem_uf")["total_bilhetes"].sum().reset_index()
-        df_dst_g = df_dst_g.sort_values(by="total_bilhetes", ascending=False).head(10)
-        fig_dest = px.bar(df_dst_g, x="ponto_destino_viagem_uf", y="total_bilhetes", color_discrete_sequence=["#F4A261"])
-        st.plotly_chart(fig_dest, use_container_width=True)
-    else:
-        st.info("Sem dados disponíveis para os estados de destino.")
