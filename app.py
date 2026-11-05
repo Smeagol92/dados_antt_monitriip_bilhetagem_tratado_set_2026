@@ -8,12 +8,12 @@ from plotly.subplots import make_subplots
 st.set_page_config(layout="wide", page_title="Dashboard ANTT Monitriip", page_icon="🚌")
 
 # ==========================================
-# 1. CARREGAMENTO DOS DADOS (LINKS REAIS RAW)
+# 1. CARREGAMENTO DOS DADOS (URL CORRIGIDA)
 # ==========================================
 @st.cache_data
 def load_all_data():
-    # URL Base corrigida para o formato Raw do seu repositório
-    base_raw_url = "https://github.com/Smeagol92/dados_antt_monitriip_bilhetagem_tratado_set_2026/tree/main/data"
+    # URL Raw oficial apontando diretamente para a pasta 'data' do seu repositório
+    base_raw_url = "https://githubusercontent.com"
     
     arquivos = {
         "geral": "tabela_data_viagem_geral.csv",
@@ -73,54 +73,50 @@ filtro_servico = st.sidebar.multiselect("Tipo de Serviço", options=dfs["servico
 filtro_tarifa = st.sidebar.multiselect("Tipo de Tarifa", options=dfs["tarifa"]["tipo_tarifa"].unique())
 
 # ==========================================
-# 3. LÓGICA DE FILTRAGEM CRUZADA EM TEMPO REAL
+# 3. FILTRAGEM TEMPORAL DOS DATAFRAMES
 # ==========================================
-def aplicar_filtros(df, coluna_especifica=None, valor_filtro=None):
-    # Primeiro passo: Filtro de tempo (comum a todas as tabelas)
-    df_f = df[(df['data_viagem_dt'] >= data_inicio_dt) & (df['data_viagem_dt'] <= data_fim_dt)].copy()
-    
-    # Segundo passo: Aplica o filtro categórico se a coluna existir na tabela atual
-    if coluna_especifica and valor_filtro:
-        if coluna_especifica in df_f.columns:
-            df_f = df_f[df_f[coluna_uf].isin(valor_filtro)]
-            
-    return df_f
+dfs_f = {}
+for key, df in dfs.items():
+    mask = (df['data_viagem_dt'] >= data_inicio_dt) & (df['data_viagem_dt'] <= data_fim_dt)
+    dfs_f[key] = df[mask].copy()
 
-# Criando dicionário com dataframes filtrados individualmente por categoria + tempo
-dfs_f = {
-    "geral": aplicar_filtros(dfs["geral"]),
-    "destino_uf": aplicar_filtros(dfs["destino_uf"], "ponto_destino_viagem_uf", filtro_destino),
-    "origem_uf": aplicar_filtros(dfs["origem_uf"], "ponto_origem_viagem_uf", filtro_origem),
-    "rota_unica": aplicar_filtros(dfs["rota_unica"]),
-    "tarifa": aplicar_filtros(dfs["tarifa"], "tipo_tarifa", filtro_tarifa),
-    "nacionalidade": aplicar_filtros(dfs["nacionalidade"], "nacional_internacional", filtro_nacionalidade),
-    "antecedencia": aplicar_filtros(dfs["antecedencia"], "meses_antecedencia", filtro_antecedencia),
-    "ambito": aplicar_filtros(dfs["ambito"], "estadual_interestadual", filtro_ambito),
-    "gratuidade": aplicar_filtros(dfs["gratuidade"], "tipo_gratuidade", filtro_gratuidade),
-    "servico": aplicar_filtros(dfs["servico"], "tipo_servico", filtro_servico)
-}
-
-# Sincronização dos filtros categóricos cruzados para os Cards de KPI
-# Filtramos a tabela Geral pelas chaves de data das tabelas que sofreram filtros categóricos
+# ==========================================
+# 4. LÓGICA DE FILTRAGEM CRUZADA EM TEMPO REAL
+# ==========================================
+# Sincronização dos filtros categóricos cruzados para as tabelas e Cards de KPI
+# Filtramos as tabelas pelas chaves de data das tabelas que sofreram filtros categóricos
 datas_validas = set(dfs_f["geral"]["data_viagem"])
 
 if filtro_ambito:
+    dfs_f["ambito"] = dfs_f["ambito"][dfs_f["ambito"]["estadual_interestadual"].isin(filtro_ambito)]
     datas_validas &= set(dfs_f["ambito"]["data_viagem"])
 if filtro_antecedencia:
+    dfs_f["antecedencia"] = dfs_f["antecedencia"][dfs_f["antecedencia"]["meses_antecedencia"].isin(filtro_antecedencia)]
     datas_validas &= set(dfs_f["antecedencia"]["data_viagem"])
 if filtro_nacionalidade:
+    dfs_f["nacionalidade"] = dfs_f["nacionalidade"][dfs_f["nacionalidade"]["nacional_internacional"].isin(filtro_nacionalidade)]
     datas_validas &= set(dfs_f["nacionalidade"]["data_viagem"])
+if filtro_origem:
+    dfs_f["origem_uf"] = dfs_f["origem_uf"][dfs_f["origem_uf"]["ponto_origem_viagem_uf"].isin(filtro_origem)]
+    datas_validas &= set(dfs_f["origem_uf"]["data_viagem"])
+if filtro_destino:
+    dfs_f["destino_uf"] = dfs_f["destino_uf"][dfs_f["destino_uf"]["ponto_destino_viagem_uf"].isin(filtro_destino)]
+    datas_validas &= set(dfs_f["destino_uf"]["data_viagem"])
 if filtro_gratuidade:
+    dfs_f["gratuidade"] = dfs_f["gratuidade"][dfs_f["gratuidade"]["tipo_gratuidade"].isin(filtro_gratuidade)]
     datas_validas &= set(dfs_f["gratuidade"]["data_viagem"])
 if filtro_servico:
+    dfs_f["servico"] = dfs_f["servico"][dfs_f["servico"]["tipo_servico"].isin(filtro_servico)]
     datas_validas &= set(dfs_f["servico"]["data_viagem"])
 if filtro_tarifa:
+    dfs_f["tarifa"] = dfs_f["tarifa"][dfs_f["tarifa"]["tipo_tarifa"].isin(filtro_tarifa)]
     datas_validas &= set(dfs_f["tarifa"]["data_viagem"])
 
+# Aplicando as datas válidas resultantes do cruzamento de filtros
 df_g_kpi = dfs_f["geral"][dfs_f["geral"]["data_viagem"].isin(datas_validas)]
 
 # ==========================================
-# 4. CARDS DE INDICADORES (KPIs)
+# 5. CARDS DE INDICADORES (KPIs)
 # ==========================================
 st.title("🚌 ANTT - Painel de Controle de Bilhetagem Monitriip")
 st.markdown("---")
@@ -131,7 +127,7 @@ ticket_medio = total_arrecadacao / total_bilhetes if total_bilhetes > 0 else 0
 
 # Taxa de aquisição em cima da hora (Meses Antecedência = 0)
 df_ant = dfs_f["antecedencia"]
-if not df_ant.empty and "data_viagem" in df_ant.columns:
+if not df_ant.empty:
     df_ant_kpi = df_ant[df_ant["data_viagem"].isin(datas_validas)]
     total_ant = df_ant_kpi["total_bilhetes"].sum()
     cima_hora = df_ant_kpi[df_ant_kpi["meses_antecedencia"] == 0]["total_bilhetes"].sum()
@@ -148,7 +144,7 @@ kpi4.metric("Compras em Cima da Hora (Mês 0)", f"{pct_cima_hora:.2f}%")
 st.markdown("---")
 
 # ==========================================
-# 5. RENDERIZAÇÃO DOS GRÁFICOS
+# 6. RENDERIZAÇÃO DOS GRÁFICOS
 # ==========================================
 col_g1, col_g2 = st.columns(2)
 
