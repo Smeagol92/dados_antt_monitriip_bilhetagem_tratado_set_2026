@@ -2,141 +2,164 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from supabase import create_client
+from plotly.subplots import make_subplots
 
-# Configuração de Layout expansivo
-st.set_page_config(page_title="Dashboard ANTT Monitriip", layout="wide")
+# Configuração de Layout da Página
+st.set_page_config(layout="wide", page_title="Dashboard ANTT Monitriip", page_icon="🚌")
 
-# 1. Conexão estável com Paginação Automática e Ordenação Segura
-@st.cache_data(ttl=3600) # Mantém cache por 1 hora para máxima performance
-def carregar_dados_do_banco():
-    # ⚠️ Mantenha as suas credenciais oficiais do Supabase aqui
-    URL = "https://czloymgdsmjysuomyvcm.supabase.co"
-    KEY = "sb_publishable_QemcKKUNYxrMcqaXziH4tA_0PI2c4Ka"
-    supabase = create_client(URL, KEY)
+# ==========================================
+# 1. CARREGAMENTO DOS DADOS DIRETOS DO GITHUB
+# ==========================================
+@st.cache_data
+def load_all_data():
+    base_raw_url = "https://githubusercontent.com"
     
-    lista_registros = []
-    tamanho_pagina = 1000
-    offset = 0
+    arquivos = {
+        "geral": "tabela_data_viagem_geral.csv",
+        "destino_uf": "tabela_ponto_destino_viagem_uf.csv",
+        "origem_uf": "tabela_ponto_origem_viagem_uf.csv",
+        "rota_unica": "tabela_rota_unica.csv",
+        "tarifa": "tabela_tipo_tarifa.csv",
+        "nacionalidade": "tabela_nacional_internacional.csv",
+        "antecedencia": "tabela_meses_antecedencia.csv",
+        "ambito": "tabela_estadual_interestadual.csv",
+        "gratuidade": "tabela_tipo_gratuidade.csv",
+        "servico": "tabela_tipo_servico.csv"
+    }
     
-    # Criamos um container de aviso visual temporário para o usuário acompanhar o carregamento
-    status_progresso = st.empty()
-    
-    # Loop de Paginação: busca dados até a API do Supabase voltar vazia
-    while True:
-        status_progresso.text(f"📥 Coletando dados do Supabase... Registros processados: {offset:,}".replace(",", "."))
+    dfs = {}
+    for key, filename in arquivos.items():
+        url = base_raw_url + filename
+        # Leitura com o separador ponto e vírgula nativo dos seus CSVs
+        dfs[key] = pd.read_csv(url, sep=";")
+        dfs[key]['data_viagem_dt'] = pd.to_datetime(dfs[key]['data_viagem'], format='%Y-%m')
         
-        # CORREÇÃO CRÍTICA: Adicionado .order("id") para garantir estabilidade na paginação do PostgreSQL
-        resposta = supabase.table("bilhetagem_antt").select(
-            "ano_emissao_bilhete, tipo_servico, tipo_tarifa, quantidade_bilhetes, valor_total"
-        ).order("id").range(offset, offset + tamanho_pagina - 1).execute()
-        
-        dados_pagina = resposta.data
-        
-        if not dados_pagina:
-            break # Se a página veio vazia, significa que coletamos toda a base!
-            
-        lista_registros.extend(dados_pagina)
-        offset += tamanho_pagina
-        
-        # Trava de segurança para evitar estouro de RAM no Streamlit Cloud gratuito
-        if offset >= 1500000: 
-            break
-            
-    # Limpa a mensagem de progresso após concluir
-    status_progresso.empty()
-    
-    df = pd.DataFrame(lista_registros)
-    df['data_txt'] = df['ano_emissao_bilhete'].astype(str)
-    return df
+    return dfs
 
-with st.spinner("Conectando ao banco de dados Supabase e quebrando limites de paginação..."):
-    df = carregar_dados_do_banco()
+# Tenta carregar todas as bases mapeadas
+try:
+    dfs = load_all_data()
+except Exception as e:
+    st.error(f"Erro de conexão ou estrutura ao carregar arquivos do GitHub: {e}")
+    st.stop()
 
-st.title("📊 Painel Estratégico de Vendas e Rotas (Supabase Cloud)")
-st.markdown(f"**Registros processados via API:** {len(df):,}".replace(",", "."))
+# ==========================================
+# 2. SELETORES DO MENU LATERAL (FILTROS)
+# ==========================================
+st.sidebar.header("Filtros do Dashboard")
+
+# Filtro de Data Dinâmico baseado no histórico geral
+todas_datas = sorted(dfs["geral"]['data_viagem_dt'].unique())
+opcoes_datas_str = [d.strftime('%m/%Y') for d in todas_datas]
+
+data_inicio_str = st.sidebar.selectbox("Data Início", opcoes_datas_str, index=0)
+data_fim_str = st.sidebar.selectbox("Data Fim", opcoes_datas_str, index=len(opcoes_datas_str)-1)
+
+data_inicio_dt = pd.to_datetime(data_inicio_str, format='%m/%Y')
+data_fim_dt = pd.to_datetime(data_fim_str, format='%m/%Y')
+
+if data_inicio_dt > data_fim_dt:
+    st.sidebar.error("A Data Início não pode ser posterior à Data Fim.")
+    st.stop()
+
+# Filtros das Tabelas Customizadas
+filtro_ambito = st.sidebar.multiselect("Âmbito da Viagem", options=dfs["ambito"]["estadual_interestadual"].unique())
+filtro_antecedencia = st.sidebar.multiselect("Meses de Antecedência", options=sorted(dfs["antecedencia"]["meses_antecedencia"].unique()))
+filtro_nacionalidade = st.sidebar.multiselect("Nacionalidade", options=dfs["nacionalidade"]["nacional_internacional"].unique())
+filtro_origem = st.sidebar.multiselect("UF de Origem", options=sorted(dfs["origem_uf"]["ponto_origem_viagem_uf"].astype(str).unique()))
+filtro_destino = st.sidebar.multiselect("UF de Destino", options=sorted(dfs["destino_uf"]["ponto_destino_viagem_uf"].astype(str).unique()))
+filtro_gratuidade = st.sidebar.multiselect("Tipo de Gratuidade", options=dfs["gratuidade"]["tipo_gratuidade"].unique())
+filtro_servico = st.sidebar.multiselect("Tipo de Serviço", options=dfs["servico"]["tipo_servico"].unique())
+filtro_tarifa = st.sidebar.multiselect("Tipo de Tarifa", options=dfs["tipo_tarifa" if "tipo_tarifa" in dfs["tarifa"].columns else "tarifa"]["tipo_tarifa"].unique())
+
+# ==========================================
+# 3. FILTRAGEM TEMPORAL DOS DATAFRAMES
+# ==========================================
+dfs_f = {}
+for key, df in dfs.items():
+    mask = (df['data_viagem_dt'] >= data_inicio_dt) & (df['data_viagem_dt'] <= data_fim_dt)
+    dfs_f[key] = df[mask].copy()
+
+# ==========================================
+# 4. CARDS DE INDICADORES (KPIs)
+# ==========================================
+st.title("🚌 ANTT - Painel de Controle de Bilhetagem Monitriip")
+st.markdown("---")
+
+# Cálculos baseados na tabela agregada geral
+df_g = dfs_f["geral"]
+total_bilhetes = df_g["total_bilhetes"].sum() if not df_g.empty else 0
+total_arrecadacao = df_g["total_arrecadacao"].sum() if not df_g.empty else 0
+ticket_medio = total_arrecadacao / total_bilhetes if total_bilhetes > 0 else 0
+
+# Taxa de aquisição em cima da hora (Meses Antecedência = 0)
+df_ant = dfs_f["antecedencia"]
+total_ant = df_ant["total_bilhetes"].sum() if not df_ant.empty else 0
+cima_hora = df_ant[df_ant["meses_antecedencia"] == 0]["total_bilhetes"].sum() if not df_ant.empty else 0
+pct_cima_hora = (cima_hora / total_ant * 100) if total_ant > 0 else 0
+
+kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+kpi1.metric("Total de Bilhetes", f"{total_bilhetes:,.0f}".replace(",", "."))
+kpi2.metric("Faturamento Geral", f"R$ {total_arrecadacao:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+kpi3.metric("Ticket Médio", f"R$ {ticket_medio:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+kpi4.metric("Compras em Cima da Hora (Mês 0)", f"{pct_cima_hora:.2f}%")
+
 st.markdown("---")
 
 # ==========================================
-# 2. BARRA LATERAL DE FILTROS (SIDEBAR)
+# 5. RENDERIZAÇÃO DOS GRÁFICOS
 # ==========================================
-st.sidebar.header("Filtros do Painel")
+col_g1, col_g2 = st.columns(2)
 
-tarifas_disponiveis = sorted(df['tipo_tarifa'].dropna().unique().astype(str))
-tarifas_selecionadas = st.sidebar.multiselect("Tipo de Tarifa:", options=tarifas_disponiveis, default=tarifas_disponiveis)
+with col_g1:
+    st.subheader("📈 Linha do Tempo: Bilhetes Emitidos vs Faturamento Arrecadado")
+    if not df_g.empty:
+        df_ev = df_g.groupby("data_viagem").agg({"total_bilhetes": "sum", "total_arrecadacao": "sum"}).reset_index()
+        fig_ev = make_subplots(specs=[[{"secondary_y": True}]])
+        fig_ev.add_trace(go.Bar(x=df_ev["data_viagem"], y=df_ev["total_bilhetes"], name="Bilhetes", marker_color="#1D3557"), secondary_y=False)
+        fig_ev.add_trace(go.Scatter(x=df_ev["data_viagem"], y=df_ev["total_arrecadacao"], name="Faturamento", line=dict(color="#E63946", width=3)), secondary_y=True)
+        fig_ev.update_layout(legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+        st.plotly_chart(fig_ev, use_container_width=True)
+    else:
+        st.info("Sem registros para o intervalo de tempo selecionado.")
 
-servicos_disponiveis = sorted(df['tipo_servico'].dropna().unique().astype(str))
-servicos_selecionados = st.sidebar.multiselect("Tipo de Serviço:", options=servicos_disponiveis, default=servicos_disponiveis)
-
-df_filtrado = df[
-    (df['tipo_tarifa'].astype(str).isin(tarifas_selecionadas)) &
-    (df['tipo_servico'].astype(str).isin(servicos_selecionados))
-].copy()
-
-# ==========================================
-# 3. CARDS KPI (MÉTRICAS)
-# ==========================================
-total_bilhetes = int(df_filtrado['quantidade_bilhetes'].sum()) if not df_filtrado.empty else 0
-faturamento_total = float(df_filtrado['valor_total'].sum()) if not df_filtrado.empty else 0.0
-ticket_medio = faturamento_total / total_bilhetes if total_bilhetes > 0 else 0.0
-
-txt_total_bilhetes = f"{total_bilhetes:,}".replace(",", ".")
-txt_faturamento_total = f"R$ {faturamento_total:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-txt_ticket_medio = f"R$ {ticket_medio:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
-kpi1, kpi2, kpi3 = st.columns(3)
-with kpi1:
-    st.metric("Total de Bilhetes Emitidos", txt_total_bilhetes)
-with kpi2:
-    st.metric("Faturamento Total", txt_faturamento_total)
-with kpi3:
-    st.metric("Ticket Médio Geral", txt_ticket_medio)
+with col_g2:
+    st.subheader("🚌 Top 10 Rotas Únicas com Maior Fluxo")
+    df_rotas = dfs_f["rota_unica"]
+    if not df_rotas.empty:
+        df_rt_g = df_rotas.groupby("rota_unica")["total_bilhetes"].sum().reset_index()
+        df_rt_g = df_rt_g.sort_values(by="total_bilhetes", ascending=True).tail(10)
+        fig_rt = px.bar(df_rt_g, x="total_bilhetes", y="rota_unica", orientation="h", color_discrete_sequence=["#457B9D"])
+        st.plotly_chart(fig_rt, use_container_width=True)
+    else:
+        st.info("Sem registros de rotas para o período.")
 
 st.markdown("---")
+col_g3, col_g4, col_g5 = st.columns(3)
 
-# ==========================================
-# 4. GRÁFICOS E VISUALIZAÇÕES
-# ==========================================
-if not df_filtrado.empty:
-    st.subheader("📈 Evolução Temporal: Bilhetes vs Faturamento")
+with col_g3:
+    st.subheader("🎫 Divisão por Tipo de Tarifa")
+    df_tf = dfs_f["tarifa"]
+    if not df_tf.empty:
+        df_tf_g = df_tf.groupby("tipo_tarifa")["total_bilhetes"].sum().reset_index()
+        fig_tf = px.pie(df_tf_g, values="total_bilhetes", names="tipo_tarifa", hole=0.3, color_discrete_sequence=px.colors.qualitative.Pastel)
+        fig_tf.update_layout(legend=dict(orientation="h", y=-0.1))
+        st.plotly_chart(fig_tf, use_container_width=True)
 
-    df_temporal = df_filtrado.groupby('data_txt').agg(
-        total_bilhetes=('quantidade_bilhetes', 'sum'),
-        total_faturamento=('valor_total', 'sum')
-    ).reset_index().sort_values('data_txt')
+with col_g4:
+    st.subheader("🌎 Proporção de Nacionalidade")
+    df_nac = dfs_f["nacionalidade"]
+    if not df_nac.empty:
+        df_nac_g = df_nac.groupby("nacional_internacional")["total_bilhetes"].sum().reset_index()
+        fig_nac = px.pie(df_nac_g, values="total_bilhetes", names="nacional_internacional", hole=0.3, color_discrete_sequence=["#2A9D8F", "#E76F51"])
+        fig_nac.update_layout(legend=dict(orientation="h", y=-0.1))
+        st.plotly_chart(fig_nac, use_container_width=True)
 
-    fig_temporal = go.Figure()
-    fig_temporal.add_trace(go.Bar(
-        x=df_temporal['data_txt'], y=df_temporal['total_bilhetes'], 
-        name="Bilhetes Emitidos", yaxis="y", marker_color='#1f77b4'
-    ))
-    fig_temporal.add_trace(go.Scatter(
-        x=df_temporal['data_txt'], y=df_temporal['total_faturamento'], 
-        name="Faturamento (R$)", yaxis="y2", mode='lines+markers', line=dict(color='#ff7f0e', width=3)
-    ))
-    
-    fig_temporal.update_layout(
-        yaxis=dict(title="Quantidade de Bilhetes", title_font_color='#1f77b4', tickfont=dict(color='#1f77b4')),
-        yaxis2=dict(title="Faturamento (R$)", title_font_color='#ff7f0e', tickfont=dict(color='#ff7f0e'), overlaying="y", side="right"),
-        legend=dict(x=0.01, y=0.99), hovermode="x unified", margin=dict(l=40, r=40, t=20, b=40)
-    )
-    st.plotly_chart(fig_temporal, use_container_width=True)
-
-    st.markdown("---")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("🚌 Participação dos Serviços no Faturamento")
-        df_servico = df_filtrado.groupby('tipo_servico', observed=False).agg(
-            Faturamento=('valor_total', 'sum')
-        ).reset_index()
-        fig_servico = px.pie(df_servico, values='Faturamento', names='tipo_servico', hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
-        st.plotly_chart(fig_servico, use_container_width=True)
-
-    with col2:
-        st.subheader("🎟️ Participação por Tipo de Tarifa")
-        df_tarifa = df_filtrado.groupby('tipo_tarifa', observed=False)['quantidade_bilhetes'].sum().reset_index()
-        fig_tarifa = px.pie(df_tarifa, values='quantidade_bilhetes', names='tipo_tarifa', color_discrete_sequence=px.colors.qualitative.Safe)
-        st.plotly_chart(fig_tarifa, use_container_width=True)
-else:
-    st.warning("⚠️ Nenhum dado encontrado para os filtros selecionados.")
+with col_g5:
+    st.subheader("🗺️ Destinos com Maior Ocupação")
+    df_dest = dfs_f["destino_uf"]
+    if not df_dest.empty:
+        df_dst_g = df_dest.groupby("ponto_destino_viagem_uf")["total_bilhetes"].sum().reset_index()
+        df_dst_g = df_dst_g.sort_values(by="total_bilhetes", ascending=False).head(10)
+        fig_dst = px.bar(df_dst_g, x="ponto_destino_viagem_uf", y="total_bilhetes", color_discrete_sequence=["#F4A261"])
+        st.plotly_chart(fig_dst, use_container_width=True)
