@@ -8,11 +8,11 @@ from plotly.subplots import make_subplots
 st.set_page_config(layout="wide", page_title="Dashboard ANTT Monitriip", page_icon="🚌")
 
 # ==========================================
-# 1. CARREGAMENTO DOS DADOS (URL RAW EXATA)
+# 1. CARREGAMENTO DOS DADOS (URL REAIS RAW)
 # ==========================================
 @st.cache_data
 def load_all_data():
-    # URL Raw oficial do GitHub apontando diretamente para a pasta 'data' do seu repositório
+    # URL Raw oficial apontando diretamente para a pasta 'data' do seu repositório no GitHub
     base_raw_url = "https://githubusercontent.com"
     
     arquivos = {
