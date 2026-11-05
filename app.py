@@ -12,7 +12,7 @@ st.set_page_config(layout="wide", page_title="Dashboard ANTT Monitriip", page_ic
 # ==========================================
 @st.cache_data
 def load_all_data():
-    # Caminho absoluto para o servidor de dados puros do seu repositório
+    # URL Raw oficial apontando diretamente para a pasta 'data' do seu repositório
     base_raw_url = "https://githubusercontent.com"
     
     arquivos = {
@@ -36,7 +36,7 @@ def load_all_data():
         
     return dfs
 
-# Carrega todas as bases de dados mapeadas diretamente do GitHub Raw
+# Carrega todas as bases de dados mapeadas
 try:
     dfs = load_all_data()
 except Exception as e:
@@ -44,7 +44,7 @@ except Exception as e:
     st.stop()
 
 # ==========================================
-# 2. SELETORES DO MENU LATERAL (FILTROS COLETIVOS)
+# 2. SELETORES DO MENU LATERAL (FILTROS)
 # ==========================================
 st.sidebar.header("Filtros do Dashboard")
 
@@ -73,7 +73,7 @@ filtro_servico = st.sidebar.multiselect("Tipo de Serviço", options=dfs["servico
 filtro_tarifa = st.sidebar.multiselect("Tipo de Tarifa", options=dfs["tarifa"]["tipo_tarifa"].unique())
 
 # ==========================================
-# 3. FILTRAGEM TEMPORAL DOS DATA FRAMES
+# 3. FILTRAGEM TEMPORAL DOS DATAFRAMES
 # ==========================================
 dfs_f = {}
 for key, df in dfs.items():
@@ -83,7 +83,6 @@ for key, df in dfs.items():
 # ==========================================
 # 4. LÓGICA DE FILTRAGEM CRUZADA EM TEMPO REAL
 # ==========================================
-# Sincronização dos filtros categóricos cruzados para as tabelas e Cards de KPI
 datas_validas = set(dfs_f["geral"]["data_viagem"])
 
 if filtro_ambito:
@@ -191,3 +190,6 @@ with col_g4:
         fig_nac.update_layout(legend=dict(orientation="h", y=-0.1))
         st.plotly_chart(fig_nac, use_container_width=True)
     else:
+        st.info("Sem dados disponíveis para nacionalidade.")
+
+with col_g5:
