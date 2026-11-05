@@ -13,7 +13,7 @@ st.set_page_config(layout="wide", page_title="Dashboard ANTT Monitriip", page_ic
 @st.cache_data
 def load_all_data():
     # URL Raw oficial apontando diretamente para a pasta 'data' do seu repositório no GitHub
-    base_raw_url = "https://githubusercontent.com"
+    base_raw_url = "https://github.com/Smeagol92/dados_antt_monitriip_bilhetagem_tratado_set_2026/tree/main/data"
     
     arquivos = {
         "geral": "tabela_data_viagem_geral.csv",
