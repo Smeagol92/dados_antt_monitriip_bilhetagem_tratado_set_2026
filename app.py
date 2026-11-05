@@ -8,11 +8,11 @@ from plotly.subplots import make_subplots
 st.set_page_config(layout="wide", page_title="Dashboard ANTT Monitriip", page_icon="🚌")
 
 # ==========================================
-# 1. CARREGAMENTO DOS DADOS (URL CORRIGIDA)
+# 1. CARREGAMENTO DOS DADOS (URL REAL RAW CORRIGIDA)
 # ==========================================
 @st.cache_data
 def load_all_data():
-    # URL Raw oficial apontando diretamente para a pasta 'data' do seu repositório
+    # Caminho absoluto para o servidor de dados puros do seu repositório
     base_raw_url = "https://githubusercontent.com"
     
     arquivos = {
@@ -36,7 +36,7 @@ def load_all_data():
         
     return dfs
 
-# Carrega todas as bases de dados mapeadas
+# Carrega todas as bases de dados mapeadas diretamente do GitHub Raw
 try:
     dfs = load_all_data()
 except Exception as e:
@@ -44,7 +44,7 @@ except Exception as e:
     st.stop()
 
 # ==========================================
-# 2. SELETORES DO MENU LATERAL (FILTROS)
+# 2. SELETORES DO MENU LATERAL (FILTROS COLETIVOS)
 # ==========================================
 st.sidebar.header("Filtros do Dashboard")
 
@@ -73,7 +73,7 @@ filtro_servico = st.sidebar.multiselect("Tipo de Serviço", options=dfs["servico
 filtro_tarifa = st.sidebar.multiselect("Tipo de Tarifa", options=dfs["tarifa"]["tipo_tarifa"].unique())
 
 # ==========================================
-# 3. FILTRAGEM TEMPORAL DOS DATAFRAMES
+# 3. FILTRAGEM TEMPORAL DOS DATA FRAMES
 # ==========================================
 dfs_f = {}
 for key, df in dfs.items():
@@ -84,7 +84,6 @@ for key, df in dfs.items():
 # 4. LÓGICA DE FILTRAGEM CRUZADA EM TEMPO REAL
 # ==========================================
 # Sincronização dos filtros categóricos cruzados para as tabelas e Cards de KPI
-# Filtramos as tabelas pelas chaves de data das tabelas que sofreram filtros categóricos
 datas_validas = set(dfs_f["geral"]["data_viagem"])
 
 if filtro_ambito:
@@ -118,9 +117,6 @@ df_g_kpi = dfs_f["geral"][dfs_f["geral"]["data_viagem"].isin(datas_validas)]
 # ==========================================
 # 5. CARDS DE INDICADORES (KPIs)
 # ==========================================
-st.title("🚌 ANTT - Painel de Controle de Bilhetagem Monitriip")
-st.markdown("---")
-
 total_bilhetes = df_g_kpi["total_bilhetes"].sum() if not df_g_kpi.empty else 0
 total_arrecadacao = df_g_kpi["total_arrecadacao"].sum() if not df_g_kpi.empty else 0
 ticket_medio = total_arrecadacao / total_bilhetes if total_bilhetes > 0 else 0
@@ -191,3 +187,7 @@ with col_g4:
     df_nac = dfs_f["nacionalidade"][dfs_f["nacionalidade"]["data_viagem"].isin(datas_validas)]
     if not df_nac.empty:
         df_nac_g = df_nac.groupby("nacional_internacional")["total_bilhetes"].sum().reset_index()
+        fig_nac = px.pie(df_nac_g, values="total_bilhetes", names="nacional_internacional", hole=0.3, color_discrete_sequence=["#2A9D8F", "#E76F51"])
+        fig_nac.update_layout(legend=dict(orientation="h", y=-0.1))
+        st.plotly_chart(fig_nac, use_container_width=True)
+    else:
