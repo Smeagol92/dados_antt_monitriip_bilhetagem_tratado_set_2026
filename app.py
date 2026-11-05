@@ -1,116 +1,96 @@
-        "tipo_tarifa",
-        "Bilhetes por tipo de tarifa",
-    )
-
-with col2:
-    grafico_rosca(
-        dfs_dim["nacionalidade"],
-        "nacional_internacional",
-        "Bilhetes por nacionalidade",
-    )
-
-col3, col4 = st.columns(2)
-
-with col3:
-    grafico_rosca(
-        dfs_dim["ambito"],
-        "estadual_interestadual",
-        "Bilhetes por âmbito da viagem",
-    )
-
-with col4:
-    grafico_rosca(
-        dfs_dim["antecedencia"],
-        "meses_antecedencia",
-        "Bilhetes por meses de antecedência",
-    )
-
-col5, col6 = st.columns(2)
-
-with col5:
-    grafico_barras(
-        dfs_dim["origem_uf"],
-        "ponto_origem_viagem_uf",
-        "Principais UFs de origem",
-        top_n=10,
-    )
-
-with col6:
-    grafico_barras(
-        dfs_dim["destino_uf"],
-        "ponto_destino_viagem_uf",
-        "Principais UFs de destino",
-        top_n=10,
-    )
-
-col7, col8 = st.columns(2)
-
-with col7:
-    grafico_barras(
-        dfs_dim["servico"],
-        "tipo_servico",
-        "Bilhetes por tipo de serviço",
-        top_n=15,
-    )
-
-with col8:
-    grafico_barras(
-        dfs_dim["gratuidade"],
-        "tipo_gratuidade",
-        "Bilhetes por tipo de gratuidade",
-        top_n=15,
-    )
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 # ============================================================
-# ROTAS — EXIBIDAS SOMENTE SE A BASE EXISTIR
+# CONFIGURAÇÃO
 # ============================================================
-if not dfs_dim["rota_unica"].empty:
-    st.divider()
-    st.subheader("🚌 Principais rotas")
-    grafico_barras(
-        dfs_dim["rota_unica"],
-        "rota_unica",
-        "Top 10 rotas por quantidade de bilhetes",
-        top_n=10,
-    )
-
-# ============================================================
-# TABELA DE DADOS E NOTAS METODOLÓGICAS
-# ============================================================
-with st.expander("Consultar dados mensais utilizados nos KPIs"):
-    tabela_kpis = df_geral[
-        ["data_viagem", "total_bilhetes", "total_arrecadacao"]
-    ].copy()
-
-    tabela_kpis["ticket_medio_calculado"] = (
-        tabela_kpis["total_arrecadacao"]
-        / tabela_kpis["total_bilhetes"].replace(0, pd.NA)
-    )
-
-    st.dataframe(
-        tabela_kpis.sort_values("data_viagem"),
-        use_container_width=True,
-        hide_index=True,
-    )
-
-with st.expander("Notas metodológicas"):
-    st.markdown(
-        """
-        - **Bilhetes emitidos:** soma de `total_bilhetes` da tabela geral.
-        - **Arrecadação:** soma de `total_arrecadacao` da tabela geral.
-        - **Ticket médio:** arrecadação total dividida pelo total de bilhetes.
-        - **Antecedência zero:** participação dos bilhetes classificados com
-          zero mês de antecedência sobre o total da tabela de antecedência.
-        - **Filtros dimensionais:** atuam somente sobre o gráfico da dimensão
-          correspondente; não alteram os KPIs gerais.
-        - **Limitação:** as tabelas agregadas separadamente não permitem
-          inferir cruzamentos entre dimensões (por exemplo, origem + destino
-          + tarifa) no nível de cada bilhete.
-        """
-    )
-
-st.caption(
-    "Fonte: dados de bilhetagem do Monitriip/ANTT disponibilizados no "
-    "repositório deste projeto. Consulte a documentação da base para "
-    "interpretação das variáveis e do período de referência."
+st.set_page_config(
+    page_title="Dashboard ANTT | Monitriip",
+    page_icon="🚌",
+    layout="wide",
 )
+
+st.title("🚌 Dashboard ANTT | Bilhetagem Monitriip")
+st.caption(
+    "Análise histórica de bilhetes, arrecadação, tarifas, serviços e "
+    "características das viagens."
+)
+
+BASE_RAW_URL = (
+    "https://raw.githubusercontent.com/"
+    "Smeagol92/dados_antt_monitriip_bilhetagem_tratado_set_2026/"
+    "main/data/"
+)
+
+# A tabela de rotas é opcional: o arquivo rota_unica informado na versão
+# anterior não foi localizado no caminho esperado do repositório.
+ARQUIVOS = {
+    "geral": "tabela_data_viagem_geral.csv",
+    "destino_uf": "tabela_ponto_destino_viagem_uf.csv",
+    "origem_uf": "tabela_ponto_origem_viagem_uf.csv",
+    "tarifa": "tabela_tipo_tarifa.csv",
+    "nacionalidade": "tabela_nacional_internacional.csv",
+    "antecedencia": "tabela_meses_antecedencia.csv",
+    "ambito": "tabela_estadual_interestadual.csv",
+    "gratuidade": "tabela_tipo_gratuidade.csv",
+    "servico": "tabela_tipo_servico.csv",
+    "rota_unica": "tabela_rota_unica.csv",  # opcional
+}
+
+COLUNAS_DIMENSAO = {
+    "destino_uf": "ponto_destino_viagem_uf",
+    "origem_uf": "ponto_origem_viagem_uf",
+    "tarifa": "tipo_tarifa",
+    "nacionalidade": "nacional_internacional",
+    "antecedencia": "meses_antecedencia",
+    "ambito": "estadual_interestadual",
+    "gratuidade": "tipo_gratuidade",
+    "servico": "tipo_servico",
+    "rota_unica": "rota_unica",
+}
+
+COLUNAS_OBRIGATORIAS = {
+    "geral": ["data_viagem", "total_bilhetes", "total_arrecadacao"],
+    "destino_uf": [
+        "data_viagem", "ponto_destino_viagem_uf", "total_bilhetes"
+    ],
+    "origem_uf": [
+        "data_viagem", "ponto_origem_viagem_uf", "total_bilhetes"
+    ],
+    "tarifa": ["data_viagem", "tipo_tarifa", "total_bilhetes"],
+    "nacionalidade": [
+        "data_viagem", "nacional_internacional", "total_bilhetes"
+    ],
+    "antecedencia": [
+        "data_viagem", "meses_antecedencia", "total_bilhetes"
+    ],
+    "ambito": [
+        "data_viagem", "estadual_interestadual", "total_bilhetes"
+    ],
+    "gratuidade": [
+        "data_viagem", "tipo_gratuidade", "total_bilhetes"
+    ],
+    "servico": ["data_viagem", "tipo_servico", "total_bilhetes"],
+    "rota_unica": ["data_viagem", "rota_unica", "total_bilhetes"],
+}
+
+MEDIDAS_NUMERICAS = [
+    "total_bilhetes",
+    "total_arrecadacao",
+    "proporcao_bilhetes",
+    "proporcao_arrecadacao",
+    "ticket_medio",
+]
+
+
+# ============================================================
+# FUNÇÕES DE APOIO
+# ============================================================
+@st.cache_data(ttl=3600, show_spinner="Carregando bases da ANTT...")
+def carregar_dados():
+    """Carrega, valida e padroniza os CSVs publicados no GitHub."""
+    bases = {}
+    avisos = []
