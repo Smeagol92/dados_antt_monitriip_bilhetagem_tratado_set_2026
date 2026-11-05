@@ -8,11 +8,11 @@ from plotly.subplots import make_subplots
 st.set_page_config(layout="wide", page_title="Dashboard ANTT Monitriip", page_icon="🚌")
 
 # ==========================================
-# 1. CARREGAMENTO DOS DADOS DIRETOS DO GITHUB
+# 1. CARREGAMENTO DOS DADOS DIRETOS DO GITHUB (CORRIGIDO)
 # ==========================================
 @st.cache_data
 def load_all_data():
-    # URL oficial raw apontando diretamente para a pasta 'data' do repositório
+    # URL RAW oficial e exata para a pasta 'data' do seu repositório no GitHub
     base_raw_url = "https://githubusercontent.com"
     
     # Dicionário mapeado exatamente com os arquivos existentes no seu GitHub
@@ -63,7 +63,7 @@ if data_inicio_dt > data_fim_dt:
     st.sidebar.error("A Data Início não pode ser posterior à Data Fim.")
     st.stop()
 
-# Filtros das Tabelas Customizadas (Protegidos contra colunas ausentes)
+# Filtros das Tabelas Customizadas
 filtro_ambito = st.sidebar.multiselect("Âmbito da Viagem", options=dfs["ambito"]["estadual_interestadual"].unique())
 filtro_antecedencia = st.sidebar.multiselect("Meses de Antecedência", options=sorted(dfs["antecedencia"]["meses_antecedencia"].unique()))
 filtro_nacionalidade = st.sidebar.multiselect("Nacionalidade", options=dfs["nacionalidade"]["nacional_internacional"].unique())
@@ -166,6 +166,6 @@ with col_g5:
         df_dst_g = df_dest.groupby("ponto_destino_viagem_uf")["total_bilhetes"].sum().reset_index()
         df_dst_g = df_dst_g.sort_values(by="total_bilhetes", ascending=False).head(10)
         fig_dest = px.bar(df_dst_g, x="ponto_destino_viagem_uf", y="total_bilhetes", color_discrete_sequence=["#F4A261"])
-        st.plotly_chart(fig_dst, use_container_width=True)
+        st.plotly_chart(fig_dest, use_container_width=True)
     else:
         st.info("Sem dados disponíveis para os estados de destino.")
