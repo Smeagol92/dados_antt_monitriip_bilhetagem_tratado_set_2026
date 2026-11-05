@@ -50,16 +50,16 @@ DIMENSIONS = {
 }
 
 REQUIRED = {
-    "geral": ["data_viagem", "total_bilhetes", "total_arrecadacao"],
-    "ambito": ["data_viagem", "estadual_interestadual", "total_bilhetes"],
-    "antecedencia": ["data_viagem", "meses_antecedencia", "total_bilhetes"],
-    "nacionalidade": ["data_viagem", "nacional_internacional", "total_bilhetes"],
-    "origem": ["data_viagem", "ponto_origem_viagem_uf", "total_bilhetes"],
-    "destino": ["data_viagem", "ponto_destino_viagem_uf", "total_bilhetes"],
-    "gratuidade": ["data_viagem", "tipo_gratuidade", "total_bilhetes"],
-    "servico": ["data_viagem", "tipo_servico", "total_bilhetes"],
-    "tarifa": ["data_viagem", "tipo_tarifa", "total_bilhetes"],
-    "rota": ["data_viagem", "rota_unica", "total_bilhetes"],
+    "geral": ["data_emissao_bilhete", "total_bilhetes", "total_arrecadacao"],
+    "ambito": ["data_emissao_bilhete", "estadual_interestadual", "total_bilhetes"],
+    "antecedencia": ["data_emissao_bilhete", "meses_antecedencia", "total_bilhetes"],
+    "nacionalidade": ["data_emissao_bilhete", "nacional_internacional", "total_bilhetes"],
+    "origem": ["data_emissao_bilhete", "ponto_origem_viagem_uf", "total_bilhetes"],
+    "destino": ["data_emissao_bilhete", "ponto_destino_viagem_uf", "total_bilhetes"],
+    "gratuidade": ["data_emissao_bilhete", "tipo_gratuidade", "total_bilhetes"],
+    "servico": ["data_emissao_bilhete", "tipo_servico", "total_bilhetes"],
+    "tarifa": ["data_emissao_bilhete", "tipo_tarifa", "total_bilhetes"],
+    "rota": ["data_emissao_bilhete", "rota_unica", "total_bilhetes"],
 }
 
 
@@ -110,12 +110,12 @@ def load_data():
                 f"{', '.join(missing)}"
             )
 
-        df["data_viagem_dt"] = pd.to_datetime(
-            df["data_viagem"].astype(str).str.strip(),
+        df["data_emissao_bilhete_dt"] = pd.to_datetime(
+            df["data_emissao_bilhete"].astype(str).str.strip(),
             format="%Y-%m",
             errors="coerce",
         )
-        df = df.dropna(subset=["data_viagem_dt"]).copy()
+        df = df.dropna(subset=["data_emissao_bilhete_dt"]).copy()
 
         for col in [
             "total_bilhetes",
@@ -165,7 +165,7 @@ def filter_period(df, start_date, end_date):
     if df.empty:
         return df.copy()
     return df.loc[
-        df["data_viagem_dt"].between(start_date, end_date)
+        df["data_emissao_bilhete_dt"].between(start_date, end_date)
     ].copy()
 
 
@@ -256,7 +256,7 @@ def show_top_bar(df, column, title, limit=10):
 # ============================================================
 st.sidebar.header("Filtros do dashboard")
 
-available_dates = sorted(dfs["geral"]["data_viagem_dt"].dropna().unique())
+available_dates = sorted(dfs["geral"]["data_emissao_bilhete_dt"].dropna().unique())
 if not available_dates:
     st.error("Não foram encontradas datas válidas na tabela geral.")
     st.stop()
@@ -367,18 +367,18 @@ if general_period.empty:
     st.info("Não há dados gerais no período selecionado.")
 else:
     temporal = (
-        general_period.groupby("data_viagem_dt", as_index=False)
+        general_period.groupby("data_emissao_bilhete_dt", as_index=False)
         .agg(
             total_bilhetes=("total_bilhetes", "sum"),
             total_arrecadacao=("total_arrecadacao", "sum"),
         )
-        .sort_values("data_viagem_dt")
+        .sort_values("data_emissao_bilhete_dt")
     )
 
     fig_time = make_subplots(specs=[[{"secondary_y": True}]])
     fig_time.add_trace(
         go.Bar(
-            x=temporal["data_viagem_dt"],
+            x=temporal["data_emissao_bilhete_dt"],
             y=temporal["total_bilhetes"],
             name="Bilhetes",
             marker_color="#1D3557",
@@ -387,7 +387,7 @@ else:
     )
     fig_time.add_trace(
         go.Scatter(
-            x=temporal["data_viagem_dt"],
+            x=temporal["data_emissao_bilhete_dt"],
             y=temporal["total_arrecadacao"],
             name="Faturamento",
             mode="lines+markers",
@@ -521,7 +521,7 @@ with st.expander("Notas metodológicas"):
           exemplo, UF de origem + UF de destino + tipo de tarifa como se
           fossem registros individuais de bilhetes.
         - O gráfico de rotas depende da existência da tabela de rotas e das
-          colunas `data_viagem`, `rota_unica` e `total_bilhetes`.
+          colunas `data_emissao_bilhete`, `rota_unica` e `total_bilhetes`.
         """
     )
 
