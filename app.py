@@ -1,7 +1,8 @@
-import streamlit as st
+import textwrap
+
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
+import streamlit as st
 from plotly.subplots import make_subplots
 
 # ============================================================
@@ -13,6 +14,17 @@ st.set_page_config(
     layout="wide",
 )
 
+# Cards (st.metric) com fonte um pouco menor que o padrão do Streamlit.
+st.markdown(
+    """
+    <style>
+    [data-testid="stMetricValue"] { font-size: 1.7rem; }
+    [data-testid="stMetricLabel"] p { font-size: 0.85rem; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.title("🚌 Dashboard ANTT | Bilhetagem Monitriip")
 st.caption("Indicadores históricos de bilhetagem e arrecadação.")
 
@@ -22,8 +34,8 @@ BASE_URL = (
     "main/data/"
 )
 
-# A tabela de rotas está configurada como opcional porque o endereço
-# tabela_rota_unica.csv atualmente retorna 404 no repositório.
+# A tabela de rotas é tratada como opcional: se o arquivo não puder ser
+# carregado, apenas os gráficos de rota ficam indisponíveis.
 FILES = {
     "geral": "tabela_data_viagem_geral.csv",
     "ambito": "tabela_estadual_interestadual.csv",
@@ -61,6 +73,38 @@ REQUIRED = {
     "tarifa": ["data_emissao_bilhete", "tipo_tarifa", "total_bilhetes"],
     "rota": ["data_emissao_bilhete", "rota_unica", "total_bilhetes"],
 }
+
+# Métricas exibidas nos gráficos e a cor fixa de cada uma.
+COLOR_TICKETS = "#1D3557"
+COLOR_REVENUE = "#E76F51"
+
+METRICS = {
+    "tickets": {
+        "col": "total_bilhetes",
+        "label": "Bilhetes",
+        "axis": "Quantidade de bilhetes",
+        "color": COLOR_TICKETS,
+    },
+    "revenue": {
+        "col": "total_arrecadacao",
+        "label": "Faturamento",
+        "axis": "Faturamento (R$)",
+        "color": COLOR_REVENUE,
+    },
+}
+
+# Paleta categórica (ordem fixa, máximo de 8 séries) para as linhas
+# da evolução temporal por dimensão.
+SERIES_COLORS = [
+    "#2a78d6",
+    "#eb6834",
+    "#1baf7a",
+    "#eda100",
+    "#e87ba4",
+    "#008300",
+    "#6250d6",
+    "#e34948",
+]
 
 
 # ============================================================
@@ -188,67 +232,248 @@ def brl(value):
     )
 
 
-def show_pie(df, column, title):
-    if df.empty:
+def compact_number(value):
+    """Formata números grandes de forma curta: 899 mil, 1,2 mi, 3,45 bi."""
+    absolute = abs(value)
+    if absolute >= 1e9:
+        text = f"{value / 1e9:.2f} bi"
+    elif absolute >= 1e6:
+        text = f"{value / 1e6:.1f} mi"
+    elif absolute >= 1e3:
+        text = f"{value / 1e3:.0f} mil"
+    else:
+        text = f"{value:.0f}"
+    return text.replace(".", ",")
+
+
+def share_text(pct):
+    if pct < 0.1:
+        return "<0,1%"
+    return f"{pct:.1f}%".replace(".", ",")
+
+
+def wrap_label(text, width):
+    return "<br>".join(textwrap.wrap(str(text), width=width)) or str(text)
+
+
+def show_bar(
+    df,
+    column,
+    metric_key,
+    title,
+    orientation="h",
+    limit=None,
+    show_share=True,
+    numeric_order=False,
+    axis_label="",
+    wrap=55,
+):
+    """Gráfico de barras (horizontal 'h' ou vertical 'v') somando a métrica
+    por categoria. Substitui os antigos gráficos de pizza/rosca e também
+    serve para os rankings e para os gráficos de faturamento."""
+    metric = METRICS[metric_key]
+    value_col = metric["col"]
+
+    if df.empty or column not in df.columns or value_col not in df.columns:
         st.info("Sem dados para os filtros selecionados.")
         return
 
-    summary = (
-        df.groupby(column, dropna=False)["total_bilhetes"]
-        .sum()
-        .reset_index()
-    )
-    summary = summary[summary["total_bilhetes"] > 0]
-
-    if summary.empty:
-        st.info("Não há bilhetes para apresentar.")
-        return
-
-    fig = px.pie(
-        summary,
-        names=column,
-        values="total_bilhetes",
-        hole=0.38,
-        title=title,
-    )
-    fig.update_traces(textposition="inside", textinfo="percent+label")
-    fig.update_layout(height=390, margin=dict(l=10, r=10, t=55, b=10))
-    st.plotly_chart(fig, use_container_width=True)
-
-
-def show_top_bar(df, column, title, limit=10):
-    if df.empty:
-        st.info("Sem dados para os filtros selecionados.")
-        return
-
-    summary = (
-        df.groupby(column, dropna=False)["total_bilhetes"]
-        .sum()
-        .nlargest(limit)
-        .sort_values()
-        .reset_index()
-    )
+    summary = df.groupby(column)[value_col].sum().reset_index()
+    summary = summary[summary[value_col] > 0]
 
     if summary.empty:
         st.info("Não há registros para apresentar.")
         return
 
-    fig = px.bar(
-        summary,
-        x="total_bilhetes",
-        y=column,
-        orientation="h",
-        title=title,
-        text="total_bilhetes",
+    # A participação é calculada sobre o total de todas as categorias,
+    # antes de aplicar o limite do ranking.
+    summary["share"] = summary[value_col] / summary[value_col].sum() * 100
+
+    if limit:
+        summary = summary.nlargest(limit, value_col)
+
+    if numeric_order:
+        summary = summary.sort_values(column)
+        summary["label"] = summary[column].map(lambda v: str(int(v)))
+    else:
+        summary = summary.sort_values(value_col, ascending=False)
+        summary["label"] = summary[column].astype(str)
+
+    if orientation == "h":
+        summary["axis_label"] = summary["label"].map(
+            lambda t: wrap_label(t, wrap)
+        )
+    else:
+        summary["axis_label"] = summary["label"]
+
+    def value_text(v):
+        if metric_key == "revenue" and orientation == "h":
+            return "R$ " + compact_number(v)
+        return compact_number(v)
+
+    summary["text"] = summary[value_col].map(value_text)
+    if show_share:
+        summary["text"] = summary["text"] + " (" + summary["share"].map(
+            share_text
+        ) + ")"
+
+    axis_ref = "x" if orientation == "h" else "y"
+    if metric_key == "tickets":
+        value_hover = f"Bilhetes: %{{{axis_ref}:,.0f}}"
+    else:
+        value_hover = f"Faturamento: R$ %{{{axis_ref}:,.2f}}"
+    hover = (
+        "<b>%{customdata[0]}</b><br>"
+        + value_hover
+        + "<br>Participação: %{customdata[1]:.1f}%<extra></extra>"
     )
-    fig.update_traces(texttemplate="%{text:,.0f}", textposition="outside")
+
+    values = summary[value_col]
+    if orientation == "h":
+        x, y = values, summary["axis_label"]
+    else:
+        x, y = summary["axis_label"], values
+
+    fig = go.Figure(
+        go.Bar(
+            x=x,
+            y=y,
+            orientation=orientation,
+            marker_color=metric["color"],
+            text=summary["text"],
+            textposition="outside",
+            cliponaxis=False,
+            customdata=list(zip(summary["label"], summary["share"])),
+            hovertemplate=hover,
+        )
+    )
+
+    peak = float(values.max())
+    n = len(summary)
+
+    if orientation == "h":
+        lines = int(summary["axis_label"].str.count("<br>").max()) + 1
+        height = max(320, (18 + 14 * lines) * n + 90)
+        pad = 1.45 if show_share else 1.25
+        fig.update_yaxes(
+            type="category",
+            autorange="reversed",
+            automargin=True,
+            title_text="",
+        )
+        fig.update_xaxes(range=[0, peak * pad], title_text=metric["axis"])
+    else:
+        height = 430
+        pad = 1.2 if show_share else 1.15
+        fig.update_xaxes(
+            type="category",
+            automargin=True,
+            title_text=axis_label,
+        )
+        fig.update_yaxes(range=[0, peak * pad], title_text=metric["axis"])
+
     fig.update_layout(
-        height=max(350, 34 * len(summary)),
-        xaxis_title="Quantidade de bilhetes",
-        yaxis_title="",
-        margin=dict(l=10, r=35, t=55, b=10),
+        title=title,
+        height=height,
+        separators=",.",
+        margin=dict(l=10, r=40, t=55, b=10),
+        showlegend=False,
     )
     st.plotly_chart(fig, use_container_width=True)
+
+
+def show_pair(df, column, title, side_by_side=True, **kwargs):
+    """Mostra o gráfico de bilhetes e o de faturamento da mesma dimensão,
+    lado a lado ou um abaixo do outro (largura total)."""
+    if df.empty:
+        st.info("Sem dados para os filtros selecionados.")
+        return
+
+    if side_by_side:
+        left, right = st.columns(2)
+        with left:
+            show_bar(df, column, "tickets", f"{title} — bilhetes", **kwargs)
+        with right:
+            show_bar(df, column, "revenue", f"{title} — faturamento", **kwargs)
+    else:
+        show_bar(df, column, "tickets", f"{title} — bilhetes", **kwargs)
+        show_bar(df, column, "revenue", f"{title} — faturamento", **kwargs)
+
+
+def show_temporal_lines(
+    df, column, dim_label, metric_key, top_n, months, numeric_order=False
+):
+    """Linhas mensais, uma por categoria da dimensão escolhida."""
+    metric = METRICS[metric_key]
+    value_col = metric["col"]
+
+    if df.empty or column not in df.columns or value_col not in df.columns:
+        st.info("Sem dados para os filtros selecionados.")
+        return
+
+    totals = df.groupby(column)[value_col].sum()
+    totals = totals[totals > 0].sort_values(ascending=False)
+
+    if totals.empty:
+        st.info("Não há registros para apresentar.")
+        return
+
+    top = totals.head(top_n).index.tolist()
+
+    # Meses sem registro da categoria contam como zero.
+    monthly = (
+        df[df[column].isin(top)]
+        .pivot_table(
+            index="data_emissao_bilhete_dt",
+            columns=column,
+            values=value_col,
+            aggfunc="sum",
+        )
+        .reindex(index=months, columns=top)
+        .fillna(0)
+    )
+
+    fig = go.Figure()
+    for i, category in enumerate(top):
+        full_name = str(int(category)) if numeric_order else str(category)
+        legend_name = (
+            full_name if len(full_name) <= 60 else full_name[:59] + "…"
+        )
+        if metric_key == "tickets":
+            hover = f"{full_name}: %{{y:,.0f}}<extra></extra>"
+        else:
+            hover = f"{full_name}: R$ %{{y:,.2f}}<extra></extra>"
+
+        fig.add_trace(
+            go.Scatter(
+                x=monthly.index,
+                y=monthly[category],
+                name=legend_name,
+                mode="lines",
+                line=dict(color=SERIES_COLORS[i], width=2.5),
+                hovertemplate=hover,
+            )
+        )
+
+    fig.update_layout(
+        height=470,
+        hovermode="x unified",
+        separators=",.",
+        legend=dict(orientation="h", y=1.02, yanchor="bottom", x=0),
+        margin=dict(l=10, r=10, t=40, b=10),
+    )
+    fig.update_xaxes(
+        title_text="Mês da viagem", tickformat="%m/%Y", hoverformat="%m/%Y"
+    )
+    fig.update_yaxes(title_text=metric["axis"])
+    st.plotly_chart(fig, use_container_width=True)
+
+    if len(totals) > top_n:
+        st.caption(
+            f"Exibindo as {top_n} maiores categorias de {dim_label} no "
+            f"período, por {metric['label'].lower()} (de {len(totals)} no "
+            "total). Ajuste a quantidade de séries acima."
+        )
 
 
 # ============================================================
@@ -358,59 +583,100 @@ st.caption(
 
 
 # ============================================================
-# 6. EVOLUÇÃO TEMPORAL — TABELA GERAL
+# 6. EVOLUÇÃO TEMPORAL
 # ============================================================
 st.divider()
-st.subheader("📈 Evolução temporal: bilhetes x faturamento")
+st.subheader("📈 Evolução temporal")
 
-if general_period.empty:
-    st.info("Não há dados gerais no período selecionado.")
-else:
-    temporal = (
-        general_period.groupby("data_emissao_bilhete_dt", as_index=False)
-        .agg(
-            total_bilhetes=("total_bilhetes", "sum"),
-            total_arrecadacao=("total_arrecadacao", "sum"),
+GENERAL_LABEL = "Geral (bilhetes x faturamento)"
+temporal_options = {GENERAL_LABEL: None}
+for dim_key, (_, dim_label) in DIMENSIONS.items():
+    temporal_options[dim_label] = dim_key
+
+t1, t2, t3 = st.columns([2, 1, 1])
+with t1:
+    temporal_choice = st.selectbox(
+        "Visualizar evolução por",
+        options=list(temporal_options.keys()),
+    )
+temporal_key = temporal_options[temporal_choice]
+
+if temporal_key is None:
+    # Visão geral: bilhetes (barras) x faturamento (linha).
+    if general_period.empty:
+        st.info("Não há dados gerais no período selecionado.")
+    else:
+        temporal = (
+            general_period.groupby("data_emissao_bilhete_dt", as_index=False)
+            .agg(
+                total_bilhetes=("total_bilhetes", "sum"),
+                total_arrecadacao=("total_arrecadacao", "sum"),
+            )
+            .sort_values("data_emissao_bilhete_dt")
         )
-        .sort_values("data_emissao_bilhete_dt")
+
+        fig_time = make_subplots(specs=[[{"secondary_y": True}]])
+        fig_time.add_trace(
+            go.Bar(
+                x=temporal["data_emissao_bilhete_dt"],
+                y=temporal["total_bilhetes"],
+                name="Bilhetes",
+                marker_color=COLOR_TICKETS,
+            ),
+            secondary_y=False,
+        )
+        fig_time.add_trace(
+            go.Scatter(
+                x=temporal["data_emissao_bilhete_dt"],
+                y=temporal["total_arrecadacao"],
+                name="Faturamento",
+                mode="lines+markers",
+                line=dict(color=COLOR_REVENUE, width=3),
+            ),
+            secondary_y=True,
+        )
+        fig_time.update_layout(
+            height=440,
+            hovermode="x unified",
+            separators=",.",
+            legend=dict(orientation="h", y=1.12, x=0),
+        )
+        fig_time.update_yaxes(title_text="Bilhetes", secondary_y=False)
+        fig_time.update_yaxes(title_text="Faturamento (R$)", secondary_y=True)
+        fig_time.update_xaxes(title_text="Mês da viagem")
+        st.plotly_chart(fig_time, use_container_width=True)
+else:
+    with t2:
+        metric_choice = st.radio(
+            "Métrica",
+            options=["Bilhetes", "Faturamento"],
+            horizontal=True,
+        )
+    with t3:
+        top_n = st.slider("Séries exibidas (maiores)", 2, 8, 5)
+
+    temporal_metric = "tickets" if metric_choice == "Bilhetes" else "revenue"
+    temporal_column, temporal_label = DIMENSIONS[temporal_key]
+    months = pd.DatetimeIndex(
+        sorted(general_period["data_emissao_bilhete_dt"].unique())
     )
 
-    fig_time = make_subplots(specs=[[{"secondary_y": True}]])
-    fig_time.add_trace(
-        go.Bar(
-            x=temporal["data_emissao_bilhete_dt"],
-            y=temporal["total_bilhetes"],
-            name="Bilhetes",
-            marker_color="#1D3557",
-        ),
-        secondary_y=False,
+    show_temporal_lines(
+        dimension_data[temporal_key],
+        temporal_column,
+        temporal_label,
+        temporal_metric,
+        top_n,
+        months,
+        numeric_order=(temporal_key == "antecedencia"),
     )
-    fig_time.add_trace(
-        go.Scatter(
-            x=temporal["data_emissao_bilhete_dt"],
-            y=temporal["total_arrecadacao"],
-            name="Faturamento",
-            mode="lines+markers",
-            line=dict(color="#E76F51", width=3),
-        ),
-        secondary_y=True,
-    )
-    fig_time.update_layout(
-        height=440,
-        hovermode="x unified",
-        legend=dict(orientation="h", y=1.12, x=0),
-    )
-    fig_time.update_yaxes(title_text="Bilhetes", secondary_y=False)
-    fig_time.update_yaxes(title_text="Faturamento (R$)", secondary_y=True)
-    fig_time.update_xaxes(title_text="Mês da viagem")
-    st.plotly_chart(fig_time, use_container_width=True)
 
 
 # ============================================================
-# 7. TOP 10 ROTAS
+# 7. TOP 20 ROTAS
 # ============================================================
 st.divider()
-st.subheader("🚌 Top 10 rotas mais movimentadas")
+st.subheader("🚌 Top 20 rotas mais movimentadas")
 
 if dimension_data["rota"].empty:
     st.warning(
@@ -420,11 +686,21 @@ if dimension_data["rota"].empty:
         "em FILES['rota']."
     )
 else:
-    show_top_bar(
+    show_bar(
         dimension_data["rota"],
         "rota_unica",
-        "Top 10 rotas por quantidade de bilhetes",
-        limit=10,
+        "tickets",
+        "Top 20 rotas por quantidade de bilhetes",
+        limit=20,
+        show_share=False,
+    )
+    show_bar(
+        dimension_data["rota"],
+        "rota_unica",
+        "revenue",
+        "Top 20 rotas por faturamento",
+        limit=20,
+        show_share=False,
     )
 
 
@@ -432,71 +708,82 @@ else:
 # 8. PARTICIPAÇÃO POR TARIFA E NACIONALIDADE
 # ============================================================
 st.divider()
-left, right = st.columns(2)
+st.subheader("Participação por tipo de tarifa")
+show_pair(
+    dimension_data["tarifa"],
+    "tipo_tarifa",
+    "Participação por tipo de tarifa",
+)
 
-with left:
-    show_pie(
-        dimension_data["tarifa"],
-        "tipo_tarifa",
-        "Participação por tipo de tarifa",
-    )
-
-with right:
-    show_pie(
-        dimension_data["nacionalidade"],
-        "nacional_internacional",
-        "Participação por nacionalidade",
-    )
-
-
-# ============================================================
-# 9. PARTICIPAÇÃO POR ESTADO DE DESTINO
-# ============================================================
 st.divider()
-show_top_bar(
-    dimension_data["destino"],
-    "ponto_destino_viagem_uf",
-    "Estados de destino com maior volume de bilhetes",
-    limit=27,
+st.subheader("Participação por nacionalidade")
+show_pair(
+    dimension_data["nacionalidade"],
+    "nacional_internacional",
+    "Participação por nacionalidade",
 )
 
 
 # ============================================================
-# 10. GRÁFICOS ADICIONAIS PARA OS FILTROS DO MENU
+# 9. ESTADO DE DESTINO (GRÁFICOS NA VERTICAL)
+# ============================================================
+st.divider()
+st.subheader("Estados de destino com maior volume de bilhetes")
+show_pair(
+    dimension_data["destino"],
+    "ponto_destino_viagem_uf",
+    "Estados de destino",
+    side_by_side=False,
+    orientation="v",
+    limit=27,
+    show_share=False,
+    axis_label="UF de destino",
+)
+
+
+# ============================================================
+# 10. ANÁLISES COMPLEMENTARES
 # ============================================================
 st.divider()
 st.subheader("Análises complementares")
 
-c1, c2 = st.columns(2)
-with c1:
-    show_pie(
-        dimension_data["ambito"],
-        "estadual_interestadual",
-        "Participação por âmbito da viagem",
-    )
-with c2:
-    show_pie(
-        dimension_data["antecedencia"],
-        "meses_antecedencia",
-        "Distribuição por meses de antecedência",
-    )
+st.markdown("#### Âmbito da viagem")
+show_pair(
+    dimension_data["ambito"],
+    "estadual_interestadual",
+    "Participação por âmbito da viagem",
+)
 
-c3, c4 = st.columns(2)
-with c3:
-    show_top_bar(
-        dimension_data["origem"],
-        "ponto_origem_viagem_uf",
-        "Principais UFs de origem",
-        limit=10,
-    )
-with c4:
-    show_pie(
-        dimension_data["gratuidade"],
-        "tipo_gratuidade",
-        "Participação por tipo de gratuidade",
-    )
+st.markdown("#### Meses de antecedência")
+show_pair(
+    dimension_data["antecedencia"],
+    "meses_antecedencia",
+    "Distribuição por meses de antecedência",
+    orientation="v",
+    numeric_order=True,
+    show_share=False,
+    axis_label="Meses de antecedência",
+)
 
-show_pie(
+st.markdown("#### UF de origem")
+show_pair(
+    dimension_data["origem"],
+    "ponto_origem_viagem_uf",
+    "Principais UFs de origem",
+    limit=10,
+    show_share=False,
+)
+
+st.markdown("#### Tipo de gratuidade")
+show_pair(
+    dimension_data["gratuidade"],
+    "tipo_gratuidade",
+    "Participação por tipo de gratuidade",
+    side_by_side=False,
+)
+
+st.markdown("#### Tipo de serviço")
+show_pair(
     dimension_data["servico"],
     "tipo_servico",
     "Participação por tipo de serviço",
@@ -509,12 +796,19 @@ show_pie(
 with st.expander("Notas metodológicas"):
     st.markdown(
         """
-        - Os KPIs gerais e a série temporal são calculados a partir da
-          tabela `tabela_data_viagem_geral.csv`.
+        - Os KPIs gerais e a visão geral da série temporal são calculados a
+          partir da tabela `tabela_data_viagem_geral.csv`.
+        - A evolução temporal por dimensão usa a tabela da dimensão escolhida
+          e mostra as maiores categorias do período (até 8 linhas). Meses sem
+          registro de uma categoria são tratados como zero.
         - O ticket médio exibido é calculado como faturamento total dividido
           pelo total de bilhetes.
         - O percentual de antecedência zero é calculado sobre o total de
           bilhetes da tabela de antecedência no período selecionado.
+        - Nos gráficos de participação, o percentual é calculado sobre o total
+          de todas as categorias da dimensão no período, mesmo quando só as
+          maiores são exibidas. Os rankings de bilhetes e de faturamento são
+          calculados de forma independente.
         - Os filtros de dimensão atuam somente sobre o gráfico da dimensão
           correspondente.
         - As tabelas agregadas separadamente não permitem cruzar, por
