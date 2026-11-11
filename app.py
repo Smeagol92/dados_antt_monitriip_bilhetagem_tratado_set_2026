@@ -5,6 +5,8 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
+import ml  # funções de machine learning (arquivo ml.py na mesma pasta)
+
 # ============================================================
 # 1. CONFIGURAÇÃO
 # ============================================================
@@ -869,7 +871,698 @@ show_pair(
 
 
 # ============================================================
-# 11. NOTAS METODOLÓGICAS E FONTE
+# 11. MACHINE LEARNING
+# ============================================================
+MONTH_NAMES = [
+    "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
+    "Jul", "Ago", "Set", "Out", "Nov", "Dez",
+]
+COLOR_OBSERVED = SERIES_COLORS[0]
+COLOR_FORECAST = SERIES_COLORS[1]
+COLOR_ALERT = SERIES_COLORS[7]
+COLOR_MUTED = "#8a8a8a"
+
+ML_METRICS = {
+    "Bilhetes": ("tickets", "Quantidade de bilhetes"),
+    "Faturamento": ("revenue", "Faturamento (R$)"),
+    "Ticket médio": ("avg", "Ticket médio (R$)"),
+}
+
+
+def ml_format(metric_key, value):
+    if pd.isna(value):
+        return "—"
+    if metric_key == "tickets":
+        return br_number(value)
+    return brl(value)
+
+
+def ml_hover(metric_key):
+    if metric_key == "tickets":
+        return "%{y:,.0f}"
+    if metric_key == "revenue":
+        return "R$ %{y:,.0f}"
+    return "R$ %{y:,.2f}"
+
+
+def pct_text(value, signed=False):
+    text = f"{value:+.1f}%" if signed else f"{value:.1f}%"
+    return text.replace(".", ",")
+
+
+def build_ml_series(dim_key, category, metric_key, months):
+    """Série mensal completa (histórico inteiro) da dimensão/categoria."""
+    if dim_key is None:
+        df = dfs["geral"]
+    else:
+        df = dfs[dim_key]
+        df = df[df[DIMENSIONS[dim_key][0]] == category]
+
+    tickets = ml.monthly_series(df, "total_bilhetes", months)
+    revenue = ml.monthly_series(df, "total_arrecadacao", months)
+
+    if metric_key == "tickets":
+        return tickets
+    if metric_key == "revenue":
+        return revenue
+    return revenue / tickets.where(tickets > 0)
+
+
+st.divider()
+st.subheader("🤖 Machine learning")
+st.caption(
+    "Previsão, anomalias e decomposição usam todo o histórico da série "
+    "escolhida (sem o filtro de período da lateral). O agrupamento de rotas "
+    "respeita o período selecionado."
+)
+
+all_months = pd.date_range(
+    dfs["geral"]["data_emissao_bilhete_dt"].min(),
+    dfs["geral"]["data_emissao_bilhete_dt"].max(),
+    freq="MS",
+)
+
+SERIES_DIMENSIONS = {"Geral (todas as viagens)": None}
+for _key, (_col, _label) in DIMENSIONS.items():
+    if _key != "rota":
+        SERIES_DIMENSIONS[_label] = _key
+
+with st.container(border=True):
+    st.markdown("**Série analisada** (abas Previsão, Anomalias e Decomposição)")
+    col_dim, col_cat, col_metric = st.columns([1.2, 1.6, 1.2])
+
+    with col_dim:
+        dim_choice = st.selectbox(
+            "Dimensão", options=list(SERIES_DIMENSIONS), key="ml_dim"
+        )
+    ml_dim_key = SERIES_DIMENSIONS[dim_choice]
+    ml_category = None
+
+    with col_cat:
+        if ml_dim_key is None:
+            st.selectbox(
+                "Categoria", options=["Todas"], disabled=True, key="ml_cat_all"
+            )
+        else:
+            cat_col = DIMENSIONS[ml_dim_key][0]
+            cat_df = dfs[ml_dim_key]
+            if ml_dim_key == "antecedencia":
+                categories = sorted(cat_df[cat_col].dropna().unique().tolist())
+            else:
+                categories = (
+                    cat_df.groupby(cat_col)["total_bilhetes"]
+                    .sum()
+                    .sort_values(ascending=False)
+                    .index.tolist()
+                )
+            ml_category = st.selectbox(
+                "Categoria",
+                options=categories,
+                key=f"ml_cat_{ml_dim_key}",
+                format_func=lambda v: (
+                    str(int(v)) if ml_dim_key == "antecedencia" else str(v)
+                ),
+            )
+
+    with col_metric:
+        ml_metric_choice = st.selectbox(
+            "Métrica da série", options=list(ML_METRICS), key="ml_metric"
+        )
+    ml_metric_key, ml_metric_axis = ML_METRICS[ml_metric_choice]
+
+    tickets_general = ml.monthly_series(
+        dfs["geral"], "total_bilhetes", all_months
+    )
+    suggested_exclude = ml.suggest_exclude_last(tickets_general)
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        exclude_last = int(
+            st.number_input(
+                "Ignorar os últimos N meses no treino",
+                min_value=0,
+                max_value=12,
+                value=suggested_exclude,
+                step=1,
+                help=(
+                    "Meses recentes costumam estar com carga incompleta e "
+                    "distorcem o treino. O valor inicial é sugerido "
+                    "automaticamente pela base."
+                ),
+            )
+        )
+    with col_b:
+        ignore_pandemic = st.checkbox(
+            "Ignorar a pandemia (03/2020 a 12/2021) no treino",
+            value=True,
+        )
+
+if suggested_exclude > 0:
+    first_low = all_months[-suggested_exclude].strftime("%m/%Y")
+    last_low = all_months[-1].strftime("%m/%Y")
+    st.warning(
+        f"Atenção à qualidade dos dados: de {first_low} a {last_low} a base "
+        "tem menos de 50% do volume do mesmo mês do ano anterior, o que "
+        "indica carga incompleta. Por padrão esses meses ficam fora do treino."
+    )
+
+category_text = (
+    "Geral"
+    if ml_dim_key is None
+    else f"{dim_choice}: "
+    + (str(int(ml_category)) if ml_dim_key == "antecedencia" else str(ml_category))
+)
+ml_title = f"{ml_metric_choice} — {category_text}"
+
+ml_series = build_ml_series(ml_dim_key, ml_category, ml_metric_key, all_months)
+use_mask = ml.training_mask(all_months, exclude_last, ignore_pandemic)
+
+try:
+    decomp, decomp_multiplicative = ml.decompose(ml_series, use_mask)
+    decomp_error = None
+except ValueError as exc:
+    decomp, decomp_multiplicative, decomp_error = None, True, str(exc)
+
+tab_forecast, tab_anomaly, tab_decomp, tab_cluster = st.tabs(
+    [
+        "📈 Previsão",
+        "🚨 Anomalias",
+        "🧩 Decomposição sazonal",
+        "🗺️ Agrupamento de rotas",
+    ]
+)
+
+# ---------------- Previsão ----------------
+with tab_forecast:
+    horizon = st.slider("Meses a prever", 3, 12, 12)
+    try:
+        fc_result = ml.forecast_series(ml_series, use_mask, horizon)
+    except ValueError as exc:
+        st.info(str(exc))
+    else:
+        fc = fc_result["forecast"]
+        backtest = fc_result["backtest"]
+        best_mape = float(backtest.loc[0, "MAPE (%)"])
+        hover = ml_hover(ml_metric_key)
+
+        fig_fc = go.Figure()
+        fig_fc.add_trace(
+            go.Scatter(
+                x=ml_series.index,
+                y=ml_series.where(use_mask),
+                name="Histórico (treino)",
+                mode="lines",
+                line=dict(color=COLOR_OBSERVED, width=2.5),
+                hovertemplate=f"Histórico: {hover}<extra></extra>",
+            )
+        )
+        excluded_values = ml_series.where(~use_mask)
+        if excluded_values.notna().any():
+            fig_fc.add_trace(
+                go.Scatter(
+                    x=excluded_values.index,
+                    y=excluded_values,
+                    name="Meses fora do treino",
+                    mode="markers",
+                    marker=dict(color=COLOR_MUTED, size=7, symbol="x"),
+                    hovertemplate=f"Fora do treino: {hover}<extra></extra>",
+                )
+            )
+        fig_fc.add_trace(
+            go.Scatter(
+                x=fc.index,
+                y=fc["upper"],
+                mode="lines",
+                line=dict(width=0),
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+        fig_fc.add_trace(
+            go.Scatter(
+                x=fc.index,
+                y=fc["lower"],
+                mode="lines",
+                line=dict(width=0),
+                fill="tonexty",
+                fillcolor="rgba(235,104,52,0.18)",
+                name="Faixa de 80%",
+                hovertemplate=f"Mínimo (80%): {hover}<extra></extra>",
+            )
+        )
+        fig_fc.add_trace(
+            go.Scatter(
+                x=fc.index,
+                y=fc["pred"],
+                name="Previsão",
+                mode="lines+markers",
+                line=dict(color=COLOR_FORECAST, width=2.5, dash="dash"),
+                marker=dict(size=6),
+                hovertemplate=f"Previsão: {hover}<extra></extra>",
+            )
+        )
+        fig_fc.update_layout(
+            title=f"Previsão — {ml_title}",
+            height=450,
+            hovermode="x unified",
+            separators=",.",
+            legend=dict(orientation="h", y=-0.15, x=0),
+            margin=dict(l=10, r=10, t=55, b=10),
+        )
+        fig_fc.update_xaxes(tickformat="%m/%Y", hoverformat="%m/%Y")
+        fig_fc.update_yaxes(title_text=ml_metric_axis)
+        st.plotly_chart(fig_fc, use_container_width=True)
+
+        f1, f2, f3 = st.columns(3)
+        f1.metric("Erro do backtest (MAPE)", pct_text(best_mape))
+        f2.metric("Meses usados no treino", str(fc_result["train_months"]))
+        if ml_metric_key == "avg":
+            f3.metric("Média prevista", brl(fc["pred"].mean()))
+        else:
+            f3.metric(
+                f"Total previsto ({horizon} meses)",
+                ml_format(ml_metric_key, fc["pred"].sum()),
+            )
+
+        st.markdown(f"**Modelo escolhido pelo backtest:** {fc_result['best']}")
+        st.caption(
+            f"A previsão começa em {fc.index[0].strftime('%m/%Y')}, logo "
+            "após o último mês usado no treino. Os dois modelos foram "
+            f"treinados sem os últimos {fc_result['holdout_months']} meses "
+            "válidos e comparados nesse período (backtest); o de menor erro "
+            "foi reajustado com todos os dados. A faixa de 80% usa o desvio "
+            "dos erros do backtest e não cobre mudanças estruturais."
+        )
+
+        if best_mape > 50:
+            st.warning(
+                "O erro do backtest está muito alto. Provavelmente há meses "
+                "incompletos ou atípicos no treino; ajuste os controles "
+                "acima (últimos meses e pandemia)."
+            )
+
+        fc_view = pd.DataFrame(
+            {
+                "Mês": fc.index.strftime("%m/%Y"),
+                "Previsão": [ml_format(ml_metric_key, v) for v in fc["pred"]],
+                "Mínimo (80%)": [ml_format(ml_metric_key, v) for v in fc["lower"]],
+                "Máximo (80%)": [ml_format(ml_metric_key, v) for v in fc["upper"]],
+            }
+        )
+        with st.expander("Tabela da previsão e resultado do backtest"):
+            st.dataframe(fc_view, hide_index=True, use_container_width=True)
+            backtest_view = backtest.copy()
+            backtest_view["MAPE (%)"] = backtest_view["MAPE (%)"].map(pct_text)
+            st.dataframe(backtest_view, hide_index=True, use_container_width=True)
+
+# ---------------- Anomalias ----------------
+with tab_anomaly:
+    if decomp_error:
+        st.info(decomp_error)
+    else:
+        sensitivity = st.slider(
+            "Sensibilidade (% de meses sinalizados)", 3, 15, 8
+        )
+        anomalies = ml.detect_anomalies(
+            ml_series, decomp, decomp_multiplicative, sensitivity / 100
+        )
+        flagged = anomalies[anomalies["is_anomaly"]]
+        hover = ml_hover(ml_metric_key)
+
+        fig_an = go.Figure()
+        fig_an.add_trace(
+            go.Scatter(
+                x=anomalies.index,
+                y=anomalies["observed"],
+                name="Observado",
+                mode="lines",
+                line=dict(color=COLOR_OBSERVED, width=2.5),
+                hovertemplate=f"Observado: {hover}<extra></extra>",
+            )
+        )
+        fig_an.add_trace(
+            go.Scatter(
+                x=anomalies.index,
+                y=anomalies["expected"],
+                name="Esperado (tendência × sazonalidade)",
+                mode="lines",
+                line=dict(color=COLOR_MUTED, width=2, dash="dash"),
+                hovertemplate=f"Esperado: {hover}<extra></extra>",
+            )
+        )
+        fig_an.add_trace(
+            go.Scatter(
+                x=flagged.index,
+                y=flagged["observed"],
+                name="Anomalia",
+                mode="markers",
+                marker=dict(
+                    color=COLOR_ALERT,
+                    size=11,
+                    line=dict(width=2, color="white"),
+                ),
+                hovertemplate=f"Anomalia: {hover}<extra></extra>",
+            )
+        )
+        fig_an.update_layout(
+            title=f"Meses atípicos — {ml_title}",
+            height=430,
+            hovermode="x unified",
+            separators=",.",
+            legend=dict(orientation="h", y=-0.15, x=0),
+            margin=dict(l=10, r=10, t=55, b=10),
+        )
+        fig_an.update_xaxes(tickformat="%m/%Y", hoverformat="%m/%Y")
+        fig_an.update_yaxes(title_text=ml_metric_axis)
+        st.plotly_chart(fig_an, use_container_width=True)
+
+        st.caption(
+            "Isolation Forest sobre três sinais de cada mês: desvio em "
+            "relação ao esperado, variação sobre o mês anterior e variação "
+            "sobre o mesmo mês do ano anterior. O modelo sempre sinaliza a "
+            "fração escolhida de meses mais atípicos; os 12 primeiros meses "
+            "não são avaliados."
+        )
+
+        if flagged.empty:
+            st.info("Nenhum mês sinalizado.")
+        else:
+            ranked = flagged.sort_values("score", ascending=False)
+            an_view = pd.DataFrame(
+                {
+                    "Mês": ranked.index.strftime("%m/%Y"),
+                    "Observado": [
+                        ml_format(ml_metric_key, v) for v in ranked["observed"]
+                    ],
+                    "Esperado": [
+                        ml_format(ml_metric_key, v) for v in ranked["expected"]
+                    ],
+                    "Desvio": [
+                        pct_text(d * 100, signed=True) for d in ranked["deviation"]
+                    ],
+                    "Tipo": [
+                        "Queda" if d < 0 else "Alta" for d in ranked["deviation"]
+                    ],
+                    "No treino": [
+                        "Sim" if use_mask[date] else "Não" for date in ranked.index
+                    ],
+                    "Pontuação": ranked["score"].round(2),
+                }
+            )
+            st.dataframe(an_view, hide_index=True, use_container_width=True)
+
+# ---------------- Decomposição sazonal ----------------
+with tab_decomp:
+    if decomp_error:
+        st.info(decomp_error)
+    else:
+        fig_dec = make_subplots(
+            rows=3,
+            cols=1,
+            shared_xaxes=True,
+            vertical_spacing=0.08,
+            subplot_titles=(
+                "Observado e tendência",
+                "Componente sazonal",
+                "Resíduo",
+            ),
+        )
+        fig_dec.add_trace(
+            go.Scatter(
+                x=decomp.index,
+                y=decomp["observed"],
+                name="Observado",
+                mode="lines",
+                line=dict(color=COLOR_OBSERVED, width=2),
+            ),
+            row=1,
+            col=1,
+        )
+        fig_dec.add_trace(
+            go.Scatter(
+                x=decomp.index,
+                y=decomp["trend"],
+                name="Tendência",
+                mode="lines",
+                line=dict(color=COLOR_FORECAST, width=3),
+            ),
+            row=1,
+            col=1,
+        )
+        fig_dec.add_trace(
+            go.Scatter(
+                x=decomp.index,
+                y=decomp["seasonal"],
+                name="Sazonalidade",
+                mode="lines",
+                line=dict(color=SERIES_COLORS[2], width=2),
+            ),
+            row=2,
+            col=1,
+        )
+        fig_dec.add_trace(
+            go.Scatter(
+                x=decomp.index,
+                y=decomp["resid"],
+                name="Resíduo",
+                mode="lines",
+                line=dict(color=COLOR_MUTED, width=1.5),
+            ),
+            row=3,
+            col=1,
+        )
+        fig_dec.update_layout(
+            title=f"Decomposição — {ml_title}",
+            height=640,
+            hovermode="x unified",
+            separators=",.",
+            legend=dict(orientation="h", y=-0.08, x=0),
+            margin=dict(l=10, r=10, t=75, b=10),
+        )
+        fig_dec.update_xaxes(tickformat="%m/%Y", hoverformat="%m/%Y")
+        st.plotly_chart(fig_dec, use_container_width=True)
+
+        seasonal_by_month = decomp.groupby(decomp.index.month)["seasonal"].first()
+        if decomp_multiplicative:
+            effect = (seasonal_by_month - 1) * 100
+            effect_title = "Efeito sazonal sobre a tendência (%)"
+            effect_text = [pct_text(v, signed=True) for v in effect]
+        else:
+            effect = seasonal_by_month
+            effect_title = f"Efeito sazonal ({ml_metric_axis})"
+            effect_text = [f"{v:,.0f}" for v in effect]
+
+        fig_season = go.Figure(
+            go.Bar(
+                x=[MONTH_NAMES[m - 1] for m in effect.index],
+                y=effect.to_numpy(),
+                marker_color=COLOR_OBSERVED,
+                text=effect_text,
+                textposition="outside",
+                cliponaxis=False,
+            )
+        )
+        fig_season.update_layout(
+            title="Perfil sazonal por mês do ano",
+            height=380,
+            separators=",.",
+            margin=dict(l=10, r=10, t=55, b=10),
+        )
+        fig_season.update_xaxes(type="category")
+        fig_season.update_yaxes(title_text=effect_title, zeroline=True)
+        st.plotly_chart(fig_season, use_container_width=True)
+
+        st.caption(
+            "Decomposição clássica por média móvel centrada de 12 meses, no "
+            + (
+                "modo multiplicativo (a sazonalidade é proporcional ao nível)."
+                if decomp_multiplicative
+                else "modo aditivo (a série tem valores zero)."
+            )
+            + " Nos extremos da série a tendência é repetida a partir do "
+            "último valor calculado. Os meses fora do treino não entram no "
+            "cálculo do perfil sazonal."
+        )
+
+# ---------------- Agrupamento de rotas ----------------
+with tab_cluster:
+    route_period = period_data["rota"]
+    n_route_months = (
+        route_period["data_emissao_bilhete_dt"].nunique()
+        if not route_period.empty
+        else 0
+    )
+
+    if route_period.empty:
+        st.warning("O agrupamento de rotas depende da tabela de rotas.")
+    elif n_route_months < 12:
+        st.info(
+            "Selecione na lateral um período de ao menos 12 meses para "
+            "agrupar as rotas."
+        )
+    else:
+        cl1, cl2 = st.columns(2)
+        with cl1:
+            n_groups = st.slider("Número de grupos", 2, 8, 4)
+        with cl2:
+            min_months = st.slider(
+                "Mínimo de meses com registro da rota",
+                6,
+                n_route_months,
+                min(24, max(6, n_route_months // 2)),
+            )
+
+        try:
+            clusters = ml.cluster_routes(route_period, n_groups, min_months)
+        except ValueError as exc:
+            st.info(str(exc))
+        else:
+            routes_df = clusters["routes"]
+            best_k = max(
+                clusters["silhouette_by_k"], key=clusters["silhouette_by_k"].get
+            )
+            sil = clusters["silhouette"]
+
+            g1, g2, g3 = st.columns(3)
+            g1.metric("Rotas analisadas", br_number(clusters["n_routes"]))
+            g2.metric("Silhueta", f"{sil:.2f}".replace(".", ","))
+            g3.metric("k sugerido pela silhueta", str(best_k))
+
+            fig_cl = go.Figure()
+            for position, group_id in enumerate(sorted(routes_df["grupo"].unique())):
+                part = routes_df[routes_df["grupo"] == group_id]
+                profile = part["perfil"].iloc[0]
+                fig_cl.add_trace(
+                    go.Scatter(
+                        x=part["pc1"],
+                        y=part["pc2"],
+                        name=f"Grupo {group_id} — {profile}",
+                        mode="markers",
+                        marker=dict(
+                            color=SERIES_COLORS[position % len(SERIES_COLORS)],
+                            size=9,
+                            line=dict(width=1, color="white"),
+                        ),
+                        text=part["rota_unica"],
+                        customdata=list(
+                            zip(part["media_mensal"], part["ticket_medio"])
+                        ),
+                        hovertemplate=(
+                            "<b>%{text}</b><br>"
+                            f"Grupo {group_id}<br>"
+                            "Bilhetes/mês: %{customdata[0]:,.0f}<br>"
+                            "Ticket médio: R$ %{customdata[1]:,.2f}"
+                            "<extra></extra>"
+                        ),
+                    )
+                )
+            fig_cl.update_layout(
+                title="Mapa de rotas (projeção PCA em 2 dimensões)",
+                height=520,
+                separators=",.",
+                legend=dict(orientation="h", y=-0.15, x=0),
+                margin=dict(l=10, r=10, t=55, b=10),
+            )
+            fig_cl.update_xaxes(title_text="Componente 1")
+            fig_cl.update_yaxes(title_text="Componente 2")
+            st.plotly_chart(fig_cl, use_container_width=True)
+
+            if sil >= 0.5:
+                reading = "grupos bem separados"
+            elif sil >= 0.25:
+                reading = "separação moderada entre os grupos"
+            else:
+                reading = (
+                    "separação fraca: os perfis de rota formam mais um "
+                    "contínuo do que grupos distintos"
+                )
+            st.caption(
+                f"Silhueta de {sil:.2f}".replace(".", ",")
+                + f" ({reading}). A projeção em 2D explica "
+                + pct_text(clusters["explained"] * 100)
+                + " da variação das características. Cada rota é descrita "
+                "por volume médio mensal, ticket médio, variação mensal e "
+                "pico sazonal. Como a tabela de rotas traz só as rotas mais "
+                "movimentadas de cada mês, as médias consideram apenas os "
+                "meses em que a rota aparece."
+            )
+
+            summary = clusters["summary"].rename(
+                columns={
+                    "grupo": "Grupo",
+                    "perfil": "Perfil",
+                    "rotas": "Rotas",
+                    "media_mensal": "Bilhetes/mês (média)",
+                    "ticket_medio": "Ticket médio (R$)",
+                    "cv": "Variação mensal",
+                    "pico_sazonal": "Pico sazonal",
+                }
+            )[
+                [
+                    "Grupo",
+                    "Perfil",
+                    "Rotas",
+                    "Bilhetes/mês (média)",
+                    "Ticket médio (R$)",
+                    "Variação mensal",
+                    "Pico sazonal",
+                ]
+            ]
+            st.dataframe(
+                summary,
+                hide_index=True,
+                use_container_width=True,
+                column_config={
+                    "Bilhetes/mês (média)": st.column_config.NumberColumn(
+                        format="%.0f"
+                    ),
+                    "Ticket médio (R$)": st.column_config.NumberColumn(
+                        format="%.2f"
+                    ),
+                    "Variação mensal": st.column_config.NumberColumn(
+                        format="%.2f"
+                    ),
+                    "Pico sazonal": st.column_config.NumberColumn(format="%.2f"),
+                },
+            )
+
+            with st.expander("Rotas por grupo"):
+                routes_view = routes_df[
+                    [
+                        "rota_unica",
+                        "grupo",
+                        "perfil",
+                        "media_mensal",
+                        "ticket_medio",
+                        "meses",
+                    ]
+                ].rename(
+                    columns={
+                        "rota_unica": "Rota",
+                        "grupo": "Grupo",
+                        "perfil": "Perfil",
+                        "media_mensal": "Bilhetes/mês (média)",
+                        "ticket_medio": "Ticket médio (R$)",
+                        "meses": "Meses com registro",
+                    }
+                )
+                st.dataframe(
+                    routes_view,
+                    hide_index=True,
+                    use_container_width=True,
+                    column_config={
+                        "Bilhetes/mês (média)": st.column_config.NumberColumn(
+                            format="%.0f"
+                        ),
+                        "Ticket médio (R$)": st.column_config.NumberColumn(
+                            format="%.2f"
+                        ),
+                    },
+                )
+
+
+# ============================================================
+# 12. NOTAS METODOLÓGICAS E FONTE
 # ============================================================
 with st.expander("Notas metodológicas"):
     st.markdown(
@@ -900,6 +1593,16 @@ with st.expander("Notas metodológicas"):
           fossem registros individuais de bilhetes.
         - O gráfico de rotas depende da existência da tabela de rotas e das
           colunas `data_emissao_bilhete`, `rota_unica` e `total_bilhetes`.
+        - Machine learning (arquivo `ml.py`): a previsão compara uma
+          regressão com tendência e sazonalidade contra o modelo sazonal
+          ingênuo ajustado, escolhe por backtest nos últimos 12 meses
+          válidos e mostra faixa de 80%. As anomalias usam Isolation Forest
+          e o agrupamento de rotas usa K-Means.
+        - Meses da pandemia (03/2020 a 12/2021) e meses finais com carga
+          possivelmente incompleta podem ser excluídos do treino pelos
+          controles da seção de machine learning.
+        - As previsões são projeções estatísticas do histórico agregado e
+          não consideram mudanças de regulação, preços ou eventos externos.
         """
     )
 
