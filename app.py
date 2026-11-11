@@ -502,9 +502,9 @@ period_data = {
 st.sidebar.divider()
 st.sidebar.subheader("Filtros por dimensão")
 st.sidebar.caption(
-    "Cada seleção filtra o gráfico da dimensão correspondente. "
-    "As tabelas fornecidas são agregadas separadamente e não permitem "
-    "cruzar todas as dimensões no nível do bilhete."
+    "Cada seleção filtra o gráfico da dimensão correspondente e os cards "
+    "de indicadores. As tabelas fornecidas são agregadas separadamente e "
+    "não permitem cruzar todas as dimensões no nível do bilhete."
 )
 
 selected = {}
@@ -547,17 +547,66 @@ for key, (column, _) in DIMENSIONS.items():
 # Não se aplica interseção artificial de meses com filtros dimensionais.
 general_period = period_data["geral"]
 
-total_tickets = general_period["total_bilhetes"].sum()
-total_revenue = general_period["total_arrecadacao"].sum()
+period_tickets = general_period["total_bilhetes"].sum()
+period_revenue = general_period["total_arrecadacao"].sum()
+
+# Dimensões com algum valor selecionado no menu lateral.
+active_filters = [
+    key
+    for key in DIMENSIONS
+    if selected.get(key) and not dimension_data[key].empty
+]
+# Um filtro que não retorna nenhuma linha também zera os cards.
+empty_filters = [
+    key
+    for key in DIMENSIONS
+    if selected.get(key) and dimension_data[key].empty
+]
+
+if empty_filters:
+    total_tickets = 0
+    total_revenue = 0
+elif not active_filters:
+    total_tickets = period_tickets
+    total_revenue = period_revenue
+else:
+    # Cada tabela é agregada separadamente. Com um único filtro ativo, o
+    # resultado é exato (soma das categorias selecionadas). Com vários
+    # filtros, estima-se a interseção multiplicando a participação de
+    # cada seleção sobre o total do período (hipótese de independência).
+    total_tickets = period_tickets
+    total_revenue = period_revenue
+    if len(active_filters) == 1:
+        sel_df = dimension_data[active_filters[0]]
+        total_tickets = sel_df["total_bilhetes"].sum()
+        total_revenue = sel_df["total_arrecadacao"].sum()
+    else:
+        share_tickets = 1.0
+        share_revenue = 1.0
+        for key in active_filters:
+            sel_df = dimension_data[key]
+            if period_tickets:
+                share_tickets *= sel_df["total_bilhetes"].sum() / period_tickets
+            if period_revenue:
+                share_revenue *= sel_df["total_arrecadacao"].sum() / period_revenue
+        total_tickets = period_tickets * share_tickets
+        total_revenue = period_revenue * share_revenue
+
 average_ticket = total_revenue / total_tickets if total_tickets else 0
 
-# O KPI de antecedência zero usa todas as categorias da tabela de
-# antecedência no período, independentemente do multiselect da lateral.
+# Antecedência zero: percentual de bilhetes com 0 mês de antecedência.
+# Só muda quando o filtro de antecedência é usado; os demais filtros não
+# podem ser cruzados com a antecedência nas tabelas disponíveis.
 antecedencia_period = period_data["antecedencia"]
-if not antecedencia_period.empty:
-    total_antecedencia = antecedencia_period["total_bilhetes"].sum()
-    tickets_zero = antecedencia_period.loc[
-        antecedencia_period["meses_antecedencia"] == 0,
+if selected.get("antecedencia"):
+    antecedencia_base = dimension_data["antecedencia"]
+else:
+    antecedencia_base = antecedencia_period
+
+if not antecedencia_base.empty:
+    total_antecedencia = antecedencia_base["total_bilhetes"].sum()
+    tickets_zero = antecedencia_base.loc[
+        antecedencia_base["meses_antecedencia"] == 0,
         "total_bilhetes",
     ].sum()
     pct_zero = (
@@ -574,6 +623,35 @@ k1.metric("Total de bilhetes", br_number(total_tickets))
 k2.metric("Faturamento total", brl(total_revenue))
 k3.metric("Ticket médio", brl(average_ticket))
 k4.metric("Antecedência zero", f"{pct_zero:.2f}%")
+
+if len(active_filters) > 1:
+    st.warning(
+        "Há filtros em mais de uma dimensão. Como as tabelas são agregadas "
+        "separadamente, bilhetes e faturamento são uma estimativa (produto "
+        "das participações de cada seleção, assumindo independência entre "
+        "as dimensões). Com um único filtro, os valores são exatos."
+    )
+elif active_filters:
+    st.caption(
+        "Cards filtrados por: "
+        + ", ".join(DIMENSIONS[k][1] for k in active_filters)
+        + "."
+    )
+
+if "rota" in active_filters:
+    st.caption(
+        "A tabela de rotas cobre apenas as rotas mais movimentadas de cada "
+        "mês; os valores refletem as rotas selecionadas."
+    )
+
+if any(k != "antecedencia" for k in active_filters) and not selected.get(
+    "antecedencia"
+):
+    st.caption(
+        "O percentual de antecedência zero só muda com o filtro de meses "
+        "de antecedência, pois não há tabela que cruze essa dimensão com "
+        "as demais."
+    )
 
 st.caption(
     "A categoria '0 mês' representa antecedência classificada como zero "
@@ -796,8 +874,14 @@ show_pair(
 with st.expander("Notas metodológicas"):
     st.markdown(
         """
-        - Os KPIs gerais e a visão geral da série temporal são calculados a
-          partir da tabela `tabela_data_viagem_geral.csv`.
+        - Sem filtros laterais, os KPIs e a visão geral da série temporal
+          vêm da tabela `tabela_data_viagem_geral.csv`.
+        - Com um filtro em uma dimensão, os cards usam a soma das categorias
+          selecionadas na tabela daquela dimensão (valor exato). Com filtros
+          em duas ou mais dimensões, os cards mostram uma estimativa pelo
+          produto das participações, assumindo independência.
+        - O percentual de antecedência zero só é afetado pelo filtro de
+          meses de antecedência.
         - A evolução temporal por dimensão usa a tabela da dimensão escolhida
           e mostra as maiores categorias do período (até 8 linhas). Meses sem
           registro de uma categoria são tratados como zero.
@@ -809,8 +893,8 @@ with st.expander("Notas metodológicas"):
           de todas as categorias da dimensão no período, mesmo quando só as
           maiores são exibidas. Os rankings de bilhetes e de faturamento são
           calculados de forma independente.
-        - Os filtros de dimensão atuam somente sobre o gráfico da dimensão
-          correspondente.
+        - Os filtros de dimensão atuam sobre o gráfico da dimensão
+          correspondente e sobre os cards.
         - As tabelas agregadas separadamente não permitem cruzar, por
           exemplo, UF de origem + UF de destino + tipo de tarifa como se
           fossem registros individuais de bilhetes.
